@@ -77,6 +77,23 @@ every one of them each frame so parked vehicles keep their idle motion; only the
 `Vehicle.active` flag is true, so only it broadcasts network state, dust/smoke/camera effects, and HUD
 telemetry.
 
+### Vehicle-vehicle collisions
+
+Every `Vehicle` carries a box collider: half-extents on the X/Z ground plane, measured directly from
+its built geometry (`measureHalfExtents()` - a `Box3` around the group with rotation/position
+temporarily zeroed, so it stays correct regardless of a procedural body's exact shape or a GLB skin's
+proportions) rather than hand-tuned per-type constants. Each frame `Game._resolveVehicleCollisions()`
+tests the controlled vehicle's oriented box against every other vehicle - parked locally in
+`worldCars` and networked peers in `remoteCars` - via 2D SAT (`testOBBCollision`), which holds up for
+vehicles that aren't yaw-aligned mid-turn. On overlap it separates the pair along the minimum-
+penetration normal and gives each a `Vehicle.knockback` impulse decoupled from the driving model: the
+controlled vehicle's impulse points back the way it came (plus its driving `velocity` reversed and
+damped), the vehicle it hit is pushed the opposite way. `Vehicle.applyKnockback()` integrates and damps
+that impulse every frame - inside `update()` for both the controlled and any parked/remote vehicle, so
+parked ones still visibly bounce and settle even though they aren't running driving physics. Collision
+impact effects (particle burst, sound, vibration) are shared with the existing track-wall collision via
+`Game._triggerImpactFx()`.
+
 ## 8th Wall licensing
 
 XRRC loads the 8th Wall engine binary, XRExtras, and Landing Page packages from jsDelivr only when

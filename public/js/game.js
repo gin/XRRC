@@ -68,6 +68,84 @@ function pitStallPosition(type) {
   };
 }
 
+// -- Box colliders -------------------------------------------------------
+// Every vehicle gets its footprint measured directly from its built
+// geometry (procedural body or loaded glb) rather than hand-tuned
+// per-type constants, so collider size always matches what's rendered.
+// Measured with the group's transform temporarily zeroed so a vehicle's
+// current heading/position never skews the result.
+function measureHalfExtents(group) {
+  const heading = group.rotation.y;
+  const position = group.position.clone();
+  group.rotation.y = 0;
+  group.position.set(0, 0, 0);
+  group.updateWorldMatrix(true, true);
+  const box = new THREE.Box3().setFromObject(group);
+  group.rotation.y = heading;
+  group.position.copy(position);
+  group.updateWorldMatrix(true, true);
+  const size = box.getSize(new THREE.Vector3());
+  return { x: Math.max(size.x / 2, 0.05), z: Math.max(size.z / 2, 0.05) };
+}
+
+function clampToBounds(position, bounds = TRACK_BOUNDS) {
+  position.x = Core.clamp(position.x, -bounds.x, bounds.x);
+  position.z = Core.clamp(position.z, -bounds.z, bounds.z);
+}
+
+function vehicleOBB(car) {
+  const p = car.group.position;
+  return {
+    x: p.x,
+    z: p.z,
+    theta: car.group.rotation.y,
+    hx: car.halfExtents.x,
+    hz: car.halfExtents.z,
+  };
+}
+
+// Separating-axis test for two rotated rectangles in the XZ plane. Returns
+// null when they don't overlap, otherwise the minimum-penetration normal
+// (pointing from a toward b) and the overlap distance along it.
+function testOBBCollision(a, b) {
+  const ua = [Math.cos(a.theta), Math.sin(a.theta)];
+  const va = [-Math.sin(a.theta), Math.cos(a.theta)];
+  const ub = [Math.cos(b.theta), Math.sin(b.theta)];
+  const vb = [-Math.sin(b.theta), Math.cos(b.theta)];
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+
+  let minOverlap = Infinity;
+  let normal = null;
+  for (const axis of [ua, va, ub, vb]) {
+    const dist = dx * axis[0] + dz * axis[1];
+    const rA = a.hx * Math.abs(ua[0] * axis[0] + ua[1] * axis[1]) +
+      a.hz * Math.abs(va[0] * axis[0] + va[1] * axis[1]);
+    const rB = b.hx * Math.abs(ub[0] * axis[0] + ub[1] * axis[1]) +
+      b.hz * Math.abs(vb[0] * axis[0] + vb[1] * axis[1]);
+    const overlap = rA + rB - Math.abs(dist);
+    if (overlap <= 0) return null;
+    if (overlap < minOverlap) {
+      minOverlap = overlap;
+      normal = dist < 0 ? [-axis[0], -axis[1]] : [axis[0], axis[1]];
+    }
+  }
+  return { normal: { x: normal[0], z: normal[1] }, overlap: minOverlap };
+}
+
+// Adds a knockback impulse decoupled from the driving physics, capped so
+// holding throttle into an obstacle can't make it grow without bound.
+function addKnockback(car, nx, nz, speed) {
+  car.knockback.x += nx * speed;
+  car.knockback.z += nz * speed;
+  const mag = Math.hypot(car.knockback.x, car.knockback.z);
+  const maxKnockback = 2.2;
+  if (mag > maxKnockback) {
+    car.knockback.x = (car.knockback.x / mag) * maxKnockback;
+    car.knockback.z = (car.knockback.z / mag) * maxKnockback;
+  }
+}
+
 function prefersQuestQuality() {
   const requestedQuality = new URLSearchParams(window.location.search).get('quality');
   return (
@@ -225,6 +303,7 @@ class Vehicle {
     this.remoteTarget = null;
     this.remoteReceivedAt = 0;
     this._bodyTilt = 0;
+    this.knockback = { x: 0, z: 0 };
     this.modelReady = Promise.resolve();
     this.setType(type);
     this.reset(
@@ -349,6 +428,7 @@ class Vehicle {
       // Procedural placeholder so the car is visible immediately; swapped
       // for the real model once the glb finishes loading.
       this._buildRally();
+      this.halfExtents = measureHalfExtents(this.group);
       this.modelReady = this._loadGLBSkin(nextType, skin);
       return;
     }
@@ -363,6 +443,7 @@ class Vehicle {
       helicopter: () => this._buildHelicopter(),
     };
     builders[nextType]();
+    this.halfExtents = measureHalfExtents(this.group);
     this.modelReady = Promise.resolve();
   }
 
@@ -392,6 +473,7 @@ class Vehicle {
 
       this._clearVisual();
       this.visual.add(pivot);
+      this.halfExtents = measureHalfExtents(this.group);
     } catch (err) {
       console.error(`[vehicle] failed to load ${skin.file}, keeping fallback body`, err);
     }
@@ -645,6 +727,23 @@ class Vehicle {
     this.remoteTarget = null;
   }
 
+  // Collision knockback: a residual world-space velocity decoupled from
+  // the driving model, so both the controlled vehicle and whatever it
+  // hits can be shoved off their line of travel and settle back down.
+  applyKnockback(delta) {
+    const k = this.knockback;
+    if (Math.abs(k.x) < 0.001 && Math.abs(k.z) < 0.001) {
+      k.x = 0;
+      k.z = 0;
+      return;
+    }
+    this.group.position.x += k.x * delta;
+    this.group.position.z += k.z * delta;
+    const damping = Math.max(0, 1 - 6 * delta);
+    k.x *= damping;
+    k.z *= damping;
+  }
+
   setActive(active) {
     this.active = active;
     if (!active) {
@@ -675,6 +774,8 @@ class Vehicle {
     this.group.position.x = next.x;
     this.group.position.z = next.z;
     this.group.rotation.y = next.heading;
+    this.applyKnockback(delta);
+    clampToBounds(this.group.position);
     this._applyVisualMotion(delta, next.speedRatio);
     for (const pivot of this.frontWheelPivots) {
       pivot.rotation.y += ((this.steering * 0.42) - pivot.rotation.y) * 0.2;
@@ -766,6 +867,8 @@ class Vehicle {
     while (rotationDelta > Math.PI) rotationDelta -= Math.PI * 2;
     while (rotationDelta < -Math.PI) rotationDelta += Math.PI * 2;
     this.group.rotation.y += rotationDelta * blend;
+    this.applyKnockback(delta);
+    clampToBounds(this.group.position);
     this.velocity += (target.v - this.velocity) * blend;
     this.throttle = target.throttle;
     this.steering = target.steering;
@@ -1645,6 +1748,7 @@ class Game {
       if (car === this.localCar) telemetry = result;
     }
     for (const car of remoteCars.values()) car.update(delta);
+    this._resolveVehicleCollisions();
     this.particles.update(delta);
     this.collisionCooldown = Math.max(0, this.collisionCooldown - delta);
     if (!telemetry) return;
@@ -1739,22 +1843,8 @@ class Game {
       );
     }
 
-    if (telemetry.collided && telemetry.impact > 0.24 && this.collisionCooldown === 0) {
-      this.collisionCooldown = 0.28;
-      this.particles.burst(
-        this.localCar.group.position.clone().add(new THREE.Vector3(0, 0.08, 0)),
-        [0xf1c644, 0xe84a27, 0xf4ead2],
-        18,
-        Math.min(0.8, telemetry.impact)
-      );
-      audioManager.playCue('impact');
-      if (navigator.vibrate) navigator.vibrate(28);
-      document.dispatchEvent(new CustomEvent('car-impact', {
-        detail: {
-          strength: Math.min(1, Math.max(0.2, telemetry.impact)),
-          duration: 85,
-        },
-      }));
+    if (telemetry.collided && telemetry.impact > 0.24) {
+      this._triggerImpactFx(this.localCar.group.position, telemetry.impact);
     }
 
     if (this.props.jump && isGroundVehicle) {
@@ -1767,6 +1857,62 @@ class Game {
         : 0;
       this.localCar.jumpLift = Math.max(this.localCar.jumpLift, lift);
     }
+  }
+
+  // Box-collider response: when the controlled vehicle's footprint
+  // overlaps another vehicle's (parked locally, or a networked peer),
+  // separate them along the minimum-penetration axis and give each a
+  // knockback impulse - the controlled vehicle bounces back the way it
+  // came, the vehicle it hit bounces the opposite way.
+  _resolveVehicleCollisions() {
+    const car = this.localCar;
+    if (!car || !car.halfExtents) return;
+
+    const others = [];
+    for (const [type, other] of this.worldCars) {
+      if (type !== car.type) others.push(other);
+    }
+    others.push(...remoteCars.values());
+
+    for (const other of others) {
+      if (!other.halfExtents) continue;
+      const hit = testOBBCollision(vehicleOBB(car), vehicleOBB(other));
+      if (!hit) continue;
+
+      const { normal, overlap } = hit;
+      car.group.position.x -= normal.x * overlap * 0.5;
+      car.group.position.z -= normal.z * overlap * 0.5;
+      other.group.position.x += normal.x * overlap * 0.5;
+      other.group.position.z += normal.z * overlap * 0.5;
+      clampToBounds(car.group.position);
+      clampToBounds(other.group.position);
+
+      const bounceSpeed = Core.clamp(Math.abs(car.velocity) * 1.3, 0.5, 1.6);
+      addKnockback(car, -normal.x, -normal.z, bounceSpeed);
+      addKnockback(other, normal.x, normal.z, bounceSpeed * 0.8);
+      car.velocity *= -0.3;
+
+      this._triggerImpactFx(car.group.position, bounceSpeed * 0.6);
+    }
+  }
+
+  _triggerImpactFx(position, impact) {
+    if (this.collisionCooldown > 0) return;
+    this.collisionCooldown = 0.28;
+    this.particles.burst(
+      position.clone().add(new THREE.Vector3(0, 0.08, 0)),
+      [0xf1c644, 0xe84a27, 0xf4ead2],
+      18,
+      Math.min(0.8, impact)
+    );
+    audioManager.playCue('impact');
+    if (navigator.vibrate) navigator.vibrate(28);
+    document.dispatchEvent(new CustomEvent('car-impact', {
+      detail: {
+        strength: Math.min(1, Math.max(0.2, impact)),
+        duration: 85,
+      },
+    }));
   }
 
   render() {
