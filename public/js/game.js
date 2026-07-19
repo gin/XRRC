@@ -305,7 +305,7 @@ function setupShareLink(room) {
     await navigator.clipboard.writeText(url.toString());
     link.textContent = 'Copied!';
     setTimeout(() => (link.textContent = 'Copy room link'), 2000);
-  }, { once: true });
+  });
 }
 
 function enterGame(runtime = null) {
@@ -328,7 +328,7 @@ function loadScript(source, attributes = {}) {
     script.src = source;
     for (const [name, value] of Object.entries(attributes)) script.setAttribute(name, value);
     script.onload = resolve;
-    script.onerror = reject;
+    script.onerror = () => reject(new Error(`Failed to load ${source}`));
     document.head.appendChild(script);
   });
 }
@@ -377,7 +377,7 @@ async function start8thWall() {
         },
       },
     ]);
-    XR8.run({ canvas: activeGame.canvas });
+    XR8.run({ canvas: document.getElementById('scene') });
   } catch (error) {
     button.disabled = false;
     document.getElementById('lobby-status').textContent = `Could not start 8th Wall: ${error.message}`;
