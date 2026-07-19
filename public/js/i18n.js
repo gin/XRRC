@@ -115,6 +115,7 @@
       'vehicle.toy-car-taxi': 'Taxi',
       'vehicle.toy-car-cop': 'Police',
       'vehicle.car1': 'Coupe',
+      'vehicle.car2': 'Rally GT',
       'vehicle.dream-car': 'Dream car',
       'dream.title': 'Dream lab',
       'dream.hint': 'AI-built by Tripo while you wait for friends to join.',

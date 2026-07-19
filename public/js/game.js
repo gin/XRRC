@@ -28,6 +28,7 @@ const GLB_SKINS = Object.freeze({
   'toy-car-taxi': { file: 'assets/cars/toy-car-taxi.glb' },
   'toy-car-cop': { file: 'assets/cars/toy-car-cop.glb' },
   car1: { file: 'assets/cars/car1.glb' },
+  car2: { file: 'assets/cars/car2.glb' },
 });
 const GLB_SKIN_YAW_OFFSET = Math.PI;
 const GLB_SKIN_LENGTH = 0.42; // matches the rally car's chassis depth (Z)

@@ -5,7 +5,7 @@
 
 XRRC is a static-first Three.js RC racing game for desktop, mobile, private
 WebRTC multiplayer, native WebXR, and 8th Wall AR. Build a backyard course,
-choose one of 13 vehicles, and race without an application backend. The
+choose one of 14 vehicles, and race without an application backend. The
 optional Node service only handles WebRTC signaling and is designed to stay
 private behind Tailscale Serve.
 
@@ -104,7 +104,7 @@ circuit remains available in every configuration.
 | Prop plane | Procedural | Fast air vehicle with wide steering |
 | Helicopter | Procedural | Hovering air vehicle with agile pivot turns |
 | Racer 1, Racer 2, Racer 3 | GLB skins | Rally physics |
-| Taxi, Police, Coupe | GLB skins | Rally physics |
+| Taxi, Police, Coupe, Rally GT | GLB skins | Rally physics |
 
 GLB models are loaded from `public/assets/cars/` only when needed. A procedural
 rally body is shown until loading completes and remains as the fallback if an
@@ -112,7 +112,7 @@ asset cannot be loaded. Vehicle type is included in network state, so peers
 render the same procedural model or skin.
 
 The lobby's vehicle bay and the in-race bay both render a cached thumbnail
-for all 13 vehicles - the same offscreen renderer, warmed once in the lobby
+for all 14 vehicles - the same offscreen renderer, warmed once in the lobby
 so the in-race bay opens with thumbnails already cached. Selecting an
 empty slot summons that vehicle at its fixed pit stall and transfers control;
 the previous vehicle remains parked where it stopped. Selecting a parked slot
@@ -366,7 +366,7 @@ the public site.
 
 Valid vehicle IDs are `rally`, `buggy`, `truck`, `motorcycle`, `tank`, `plane`,
 `helicopter`, `toy-car-1`, `toy-car-2`, `toy-car-3`, `toy-car-taxi`,
-`toy-car-cop`, and `car1`.
+`toy-car-cop`, `car1`, and `car2`.
 
 ## Performance
 
