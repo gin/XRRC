@@ -895,13 +895,13 @@ label {
   border-color: var(--yellow);
 }
 
-.vehicle-glyph.dream-glyph {
+.vehicle-glyph.thumb-glyph {
   background-position: center;
   background-size: cover;
 }
 
-.vehicle-glyph.dream-glyph::before,
-.vehicle-glyph.dream-glyph::after {
+.vehicle-glyph.thumb-glyph::before,
+.vehicle-glyph.thumb-glyph::after {
   content: none;
 }
 

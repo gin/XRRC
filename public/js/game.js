@@ -1025,6 +1025,40 @@ function renderVehicleThumbnail(type) {
   return promise;
 }
 
+// Fills each lobby vehicle-toggle glyph with a real rendered thumbnail (the
+// same offscreen isometric render the in-race bay uses), replacing the
+// generic CSS car silhouette every vehicle shows by default - this is the
+// only way GLB skins (Racer 1-3, Taxi, Police, Coupe) show what they
+// actually look like before the race starts. Runs once at bootstrap; the
+// dream-car toggle manages its own image and is skipped here. Rendering is
+// idle-scheduled one at a time so it never blocks the lobby's first paint,
+// and results share `thumbnailCache` with the in-race bay, so that bay
+// opens with warm thumbnails instead of re-rendering everything.
+function populateLobbyVehicleThumbnails() {
+  const rail = document.querySelector('.vehicle-rail');
+  if (!rail) return;
+  const queue = Array.from(rail.querySelectorAll('input[name="vehicle"]'))
+    .filter((input) => input.value !== CUSTOM_VEHICLE_ID)
+    .map((input) => ({ type: input.value, glyph: input.closest('.vehicle-toggle').querySelector('.vehicle-glyph') }));
+  const renderNext = () => {
+    if (queue.length === 0) return;
+    scheduleBackgroundTask(async () => {
+      const { type, glyph } = queue.shift();
+      try {
+        const url = await renderVehicleThumbnail(type);
+        if (glyph.isConnected) {
+          glyph.style.backgroundImage = `url("${url}")`;
+          glyph.classList.add('thumb-glyph');
+        }
+      } catch (error) {
+        console.warn(`[vehicle] failed to render ${type} thumbnail`, error);
+      }
+      renderNext();
+    });
+  };
+  renderNext();
+}
+
 // -- Dream lab UI ----------------------------------------------------------
 // Lobby-side Tripo generation: prompt a custom vehicle (shown spinning on a
 // display plate once ready) and a map theme whose props land on the track.
@@ -1109,7 +1143,7 @@ function upsertDreamVehicleToggle() {
   }
   toggle.querySelector('strong').textContent = customSkin.label;
   const glyph = toggle.querySelector('.vehicle-glyph');
-  glyph.classList.toggle('dream-glyph', Boolean(customSkin.imageUrl));
+  glyph.classList.toggle('thumb-glyph', Boolean(customSkin.imageUrl));
   glyph.style.backgroundImage = customSkin.imageUrl ? `url("${customSkin.imageUrl}")` : '';
   toggle.querySelector('input').checked = true;
   toggle.scrollIntoView({ block: 'nearest', inline: 'center' });
@@ -3038,6 +3072,7 @@ async function bootstrap() {
 
   setupAudioControls();
   initDreamLab();
+  populateLobbyVehicleThumbnails();
   document.getElementById('room-input').addEventListener('blur', getRoom);
   document.getElementById('check-signal-btn').addEventListener('click', checkBackend);
   document.getElementById('reset-btn').addEventListener('click', () => {

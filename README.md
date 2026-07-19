@@ -111,7 +111,9 @@ rally body is shown until loading completes and remains as the fallback if an
 asset cannot be loaded. Vehicle type is included in network state, so peers
 render the same procedural model or skin.
 
-The in-race bay renders a cached thumbnail for all 13 vehicles. Selecting an
+The lobby's vehicle bay and the in-race bay both render a cached thumbnail
+for all 13 vehicles - the same offscreen renderer, warmed once in the lobby
+so the in-race bay opens with thumbnails already cached. Selecting an
 empty slot summons that vehicle at its fixed pit stall and transfers control;
 the previous vehicle remains parked where it stopped. Selecting a parked slot
 recalls and disposes that vehicle. Selecting the active slot is a no-op.
@@ -380,7 +382,8 @@ calls** and **16,258 triangles**. Browser tests enforce a ceiling of 90 draw
 calls and 90 geometries for every procedural vehicle class. GLB skin complexity
 depends on the selected asset.
 
-The in-race bay uses a separate 128 x 128 offscreen renderer. Thumbnails are
+Both the lobby and in-race vehicle bays share a 128 x 128 offscreen
+renderer and one thumbnail cache. Thumbnails are
 generated one at a time during idle windows so model parsing cannot delay the
 first rendered frame or multiplayer handshake. Each result is cached as a data
 URL and its temporary vehicle geometry is disposed.
