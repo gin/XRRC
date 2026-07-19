@@ -225,6 +225,7 @@ class Vehicle {
     this.remoteTarget = null;
     this.remoteReceivedAt = 0;
     this._bodyTilt = 0;
+    this.modelReady = Promise.resolve();
     this.setType(type);
     this.reset(
       isLocal ? START_GRID.x : START_GRID.x + 0.42,
@@ -348,7 +349,7 @@ class Vehicle {
       // Procedural placeholder so the car is visible immediately; swapped
       // for the real model once the glb finishes loading.
       this._buildRally();
-      this._loadGLBSkin(nextType, skin);
+      this.modelReady = this._loadGLBSkin(nextType, skin);
       return;
     }
 
@@ -362,6 +363,7 @@ class Vehicle {
       helicopter: () => this._buildHelicopter(),
     };
     builders[nextType]();
+    this.modelReady = Promise.resolve();
   }
 
   async _loadGLBSkin(type, skin) {
@@ -780,6 +782,66 @@ class Vehicle {
   }
 }
 
+// Offscreen rig reused to snapshot every vehicle for the in-race bay: a
+// small dedicated renderer/scene/camera, framed to each vehicle's own
+// bounding box so procedural bodies and very different-sized GLB skins
+// all fill the thumbnail consistently.
+let thumbnailRenderer = null;
+let thumbnailCanvas = null;
+let thumbnailScene = null;
+let thumbnailCamera = null;
+const thumbnailCache = new Map(); // type -> Promise<string data URL>
+
+function ensureThumbnailRig() {
+  if (thumbnailRenderer) return;
+  const size = 128;
+  thumbnailCanvas = document.createElement('canvas');
+  thumbnailCanvas.width = size;
+  thumbnailCanvas.height = size;
+  thumbnailRenderer = new THREE.WebGLRenderer({ canvas: thumbnailCanvas, antialias: true, alpha: true });
+  thumbnailRenderer.setSize(size, size);
+  thumbnailRenderer.setClearColor(0x000000, 0);
+  thumbnailScene = new THREE.Scene();
+  thumbnailScene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 3));
+  const sun = new THREE.DirectionalLight(0xffffff, 2.4);
+  sun.position.set(2, 4, 3);
+  thumbnailScene.add(sun);
+  thumbnailCamera = new THREE.PerspectiveCamera(35, 1, 0.01, 50);
+}
+
+function renderVehicleThumbnail(type) {
+  if (thumbnailCache.has(type)) return thumbnailCache.get(type);
+  const promise = (async () => {
+    ensureThumbnailRig();
+    const car = new Vehicle(0xe84a27, false, type);
+    await car.modelReady;
+    car.group.position.set(0, 0, 0);
+    car.group.rotation.set(0, -0.6, 0);
+    car.group.updateWorldMatrix(true, true);
+    thumbnailScene.add(car.group);
+
+    const box = new THREE.Box3().setFromObject(car.group);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    thumbnailCamera.position.set(
+      center.x + maxDim * 1.35,
+      center.y + maxDim * 1.05,
+      center.z + maxDim * 1.35
+    );
+    thumbnailCamera.lookAt(center);
+    thumbnailCamera.updateProjectionMatrix();
+
+    thumbnailRenderer.render(thumbnailScene, thumbnailCamera);
+    const dataUrl = thumbnailCanvas.toDataURL('image/png');
+    thumbnailScene.remove(car.group);
+    car.dispose();
+    return dataUrl;
+  })();
+  thumbnailCache.set(type, promise);
+  return promise;
+}
+
 class Game {
   constructor(canvas, props, runtime = null) {
     this.canvas = canvas;
@@ -889,6 +951,7 @@ class Game {
     const bay = document.getElementById('vehicle-bay');
     if (!bay) return;
     bay.innerHTML = '';
+    bay.style.setProperty('--bay-columns', String(Math.ceil(VEHICLE_TYPES.length / 3)));
     this.vehicleSlots = new Map();
     for (const type of VEHICLE_TYPES) {
       const slot = document.createElement('button');
@@ -896,13 +959,14 @@ class Game {
       slot.className = 'vehicle-slot';
       slot.setAttribute('role', 'option');
       slot.setAttribute('aria-label', I18n.t(`vehicle.${type}`));
-      const glyph = document.createElement('span');
-      glyph.className = 'vehicle-glyph';
-      glyph.setAttribute('aria-hidden', 'true');
-      slot.append(glyph);
+      const thumb = document.createElement('img');
+      thumb.className = 'vehicle-thumb';
+      thumb.alt = '';
+      slot.append(thumb);
       slot.addEventListener('click', () => this._onVehicleSlotClick(type));
       bay.appendChild(slot);
       this.vehicleSlots.set(type, slot);
+      renderVehicleThumbnail(type).then((url) => { thumb.src = url; }).catch(() => {});
     }
     this._syncVehicleBay();
   }

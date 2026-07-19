@@ -1209,11 +1209,14 @@ label {
   position: absolute;
   left: var(--safe-left);
   bottom: var(--safe-bottom);
-  display: flex;
-  gap: 0.32rem;
-  max-width: min(58vw, 21rem);
+  display: grid;
+  grid-template-columns: repeat(var(--bay-columns, 5), 2.5rem);
+  grid-auto-rows: 2.5rem;
+  grid-auto-flow: row;
+  gap: 0.3rem;
+  max-height: min(44vh, 8.35rem);
   padding: 0.32rem;
-  overflow-x: auto;
+  overflow-y: auto;
   background: rgb(36 37 31 / 72%);
   opacity: 0;
   pointer-events: auto;
@@ -1229,7 +1232,6 @@ label {
 .vehicle-slot {
   position: relative;
   display: grid;
-  flex: 0 0 auto;
   width: 2.5rem;
   height: 2.5rem;
   border: 1px solid rgb(244 234 210 / 22%);
@@ -1240,9 +1242,11 @@ label {
   transition: color 160ms var(--ease-state), background 160ms var(--ease-state), border-color 160ms var(--ease-state), transform 100ms var(--ease-out);
 }
 
-.vehicle-slot .vehicle-glyph {
-  width: 1.6rem;
-  height: 0.9rem;
+.vehicle-slot .vehicle-thumb {
+  width: 100%;
+  height: 100%;
+  padding: 0.1rem;
+  object-fit: contain;
 }
 
 .vehicle-slot:hover {
@@ -1534,6 +1538,18 @@ kbd {
   .text-btn {
     grid-column: 1;
   }
+
+  .vehicle-bay {
+    grid-template-columns: repeat(var(--bay-columns, 5), 2rem);
+    grid-auto-rows: 2rem;
+    gap: 0.22rem;
+    padding: 0.22rem;
+  }
+
+  .vehicle-slot {
+    width: 2rem;
+    height: 2rem;
+  }
 }
 
 @media (pointer: fine) {
@@ -1551,10 +1567,19 @@ kbd {
   summary {
     min-height: 2.75rem;
   }
+
+  #joystick-zone {
+    right: var(--safe-right);
+    left: auto;
+    transform: translateY(1rem);
+  }
 }
 
 .force-touch #joystick-zone {
   display: flex;
+  right: var(--safe-right);
+  left: auto;
+  transform: translateY(1rem);
 }
 
 .force-touch .key-hint {

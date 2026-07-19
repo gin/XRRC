@@ -61,8 +61,13 @@ the same model.
 
 ### In-race vehicle bay
 
-A second vehicle bay sits at the bottom-left of the HUD during a race, listing all 13 vehicles (7
-physics types + 6 GLB skins). Clicking an available slot summons that vehicle onto the track at its own
+A second vehicle bay sits at the bottom-left of the HUD during a race, laid out as a 3-row grid (5
+columns for the current 13 vehicles, `--bay-columns` computed from the vehicle count) so every vehicle
+is visible without scrolling. Each slot shows an actual rendered thumbnail, not an icon: an offscreen
+rig (`renderVehicleThumbnail()`) builds a real `Vehicle` for that type, waits on `Vehicle.modelReady`
+(resolves once a GLB skin has finished loading, or immediately for procedural bodies), frames it to its
+own bounding box, and snapshots it to a cached data URL. Clicking an available slot summons that vehicle
+onto the track at its own
 fixed pit-stall position and hands it control; the previously controlled vehicle is left parked exactly
 where it stopped (`Vehicle.setActive(false)` zeroes its input but keeps its idle animation running).
 Clicking a parked vehicle's slot again recalls it, freeing the slot and disposing its geometry; clicking
