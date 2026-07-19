@@ -1,142 +1,173 @@
-/* jshint esversion: 11 */
-'use strict';
+(function exposeControls(root) {
+  'use strict';
 
-/* ============================================================
-   controls.js
-   Handles keyboard (WASD / arrow keys) and touch (virtual
-   joystick) input, then fires a 'car-input' CustomEvent on
-   document with { throttle, steering } each animation frame.
-   ============================================================ */
+  const Input = root.XRRCControlsCore;
 
-class Controls {
-  constructor() {
-    this._keys = {};
-    this._throttle = 0; // -1…1
-    this._steering = 0; // -1…1
+  class Controls {
+    constructor() {
+      this._keys = new Set();
+      this._touch = { throttle: 0, steering: 0 };
+      this._pointerId = null;
+      this._joystickMaxRadius = 48;
+      this._preferredGamepadIndex = null;
+      this._activeGamepad = null;
+      this._gamepadResetPressed = false;
+      this._setupKeyboard();
+      this._setupJoystick();
+      this._setupGamepads();
+      this._startLoop();
+    }
 
-    // Touch joystick state
-    this._touchId = null;
-    this._touchOrigin = null; // { x, y } of initial touch point
-    this._joystickMaxRadius = 50; // px
+    _setupKeyboard() {
+      document.addEventListener('keydown', (event) => {
+        if (event.target.matches('input, textarea, select')) return;
+        if (event.key.startsWith('Arrow')) event.preventDefault();
+        this._keys.add(event.key.toLowerCase());
+        if (event.key.toLowerCase() === 'r' && !event.repeat) {
+          document.dispatchEvent(new CustomEvent('car-reset'));
+        }
+      });
 
-    this._setupKeyboard();
-    this._setupJoystick();
-    this._startLoop();
-  }
+      document.addEventListener('keyup', (event) => {
+        this._keys.delete(event.key.toLowerCase());
+      });
 
-  // ── Keyboard ──────────────────────────────────────────────────
-  _setupKeyboard() {
-    document.addEventListener('keydown', (e) => {
-      this._keys[e.key] = true;
-    });
-    document.addEventListener('keyup', (e) => {
-      this._keys[e.key] = false;
-    });
-  }
+      root.addEventListener('blur', () => this._resetInput());
+    }
 
-  _keyThrottle() {
-    if (
-      this._keys['ArrowUp'] ||
-      this._keys['w'] ||
-      this._keys['W']
-    ) return 1;
-    if (
-      this._keys['ArrowDown'] ||
-      this._keys['s'] ||
-      this._keys['S']
-    ) return -1;
-    return 0;
-  }
+    _setupJoystick() {
+      const zone = document.getElementById('joystick');
+      const knob = document.getElementById('joystick-knob');
+      if (!zone || !knob) return;
 
-  _keySteering() {
-    if (
-      this._keys['ArrowLeft'] ||
-      this._keys['a'] ||
-      this._keys['A']
-    ) return -1;
-    if (
-      this._keys['ArrowRight'] ||
-      this._keys['d'] ||
-      this._keys['D']
-    ) return 1;
-    return 0;
-  }
+      const update = (event) => {
+        if (event.pointerId !== this._pointerId) return;
+        const bounds = zone.getBoundingClientRect();
+        const dx = event.clientX - (bounds.left + bounds.width / 2);
+        const dy = event.clientY - (bounds.top + bounds.height / 2);
+        const distance = Math.hypot(dx, dy);
+        const clamped = Math.min(distance, this._joystickMaxRadius);
+        const angle = Math.atan2(dy, dx);
+        const x = Math.cos(angle) * clamped;
+        const y = Math.sin(angle) * clamped;
+        knob.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+        this._touch.throttle = -y / this._joystickMaxRadius;
+        this._touch.steering = x / this._joystickMaxRadius;
+      };
 
-  // ── Virtual joystick ─────────────────────────────────────────
-  _setupJoystick() {
-    const zone = document.getElementById('joystick');
-    if (!zone) return;
+      zone.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        if (this._pointerId !== null) return;
+        this._pointerId = event.pointerId;
+        zone.setPointerCapture(event.pointerId);
+        update(event);
+      });
+      zone.addEventListener('pointermove', update);
 
-    const knob = document.getElementById('joystick-knob');
-    const max = this._joystickMaxRadius;
+      const end = (event) => {
+        if (event.pointerId !== this._pointerId) return;
+        this._pointerId = null;
+        this._touch.throttle = 0;
+        this._touch.steering = 0;
+        knob.style.transform = 'translate3d(0, 0, 0)';
+      };
+      zone.addEventListener('pointerup', end);
+      zone.addEventListener('pointercancel', end);
+      zone.addEventListener('lostpointercapture', end);
+    }
 
-    zone.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      if (this._touchId !== null) return; // already tracking one touch
-      const touch = e.changedTouches[0];
-      this._touchId = touch.identifier;
-      this._touchOrigin = { x: touch.clientX, y: touch.clientY };
-    }, { passive: false });
+    _setupGamepads() {
+      root.addEventListener('gamepadconnected', ({ gamepad }) => {
+        this._preferredGamepadIndex = gamepad.index;
+        this._activeGamepad = gamepad;
+        this._emitControllerStatus(true, gamepad);
+      });
+      root.addEventListener('gamepaddisconnected', ({ gamepad }) => {
+        if (this._preferredGamepadIndex === gamepad.index) {
+          this._preferredGamepadIndex = null;
+          this._activeGamepad = null;
+        }
+        this._emitControllerStatus(false, gamepad);
+      });
+      document.addEventListener('car-impact', ({ detail }) => {
+        this.pulse(detail && detail.strength, detail && detail.duration);
+      });
+    }
 
-    zone.addEventListener('touchmove', (e) => {
-      e.preventDefault();
-      const touch = this._findTouch(e.changedTouches);
-      if (!touch) return;
-
-      const dx = touch.clientX - this._touchOrigin.x;
-      const dy = touch.clientY - this._touchOrigin.y;
-      const dist = Math.hypot(dx, dy);
-      const clamped = Math.min(dist, max);
-      const angle = Math.atan2(dy, dx);
-
-      const kx = Math.cos(angle) * clamped;
-      const ky = Math.sin(angle) * clamped;
-
-      knob.style.transform = `translate(${kx}px, ${ky}px)`;
-
-      this._throttle = -ky / max; // up = forward
-      this._steering = kx / max;
-    }, { passive: false });
-
-    const endTouch = (e) => {
-      const touch = this._findTouch(e.changedTouches);
-      if (!touch) return;
-      this._touchId = null;
-      this._touchOrigin = null;
-      this._throttle = 0;
-      this._steering = 0;
-      knob.style.transform = 'translate(0px, 0px)';
-    };
-
-    zone.addEventListener('touchend', endTouch, { passive: false });
-    zone.addEventListener('touchcancel', endTouch, { passive: false });
-  }
-
-  _findTouch(list) {
-    return Array.from(list).find((t) => t.identifier === this._touchId) || null;
-  }
-
-  // ── Input loop ───────────────────────────────────────────────
-  _startLoop() {
-    const dispatch = () => {
-      // Keyboard takes priority over joystick when both active
-      const keyT = this._keyThrottle();
-      const keyS = this._keySteering();
-
-      const throttle = keyT !== 0 ? keyT : this._throttle;
-      const steering = keyS !== 0 ? keyS : this._steering;
-
-      document.dispatchEvent(
-        new CustomEvent('car-input', { detail: { throttle, steering } })
+    _readGamepad() {
+      if (!navigator.getGamepads) {
+        return { throttle: 0, steering: 0, resetPressed: false };
+      }
+      const nextGamepad = Input.findActiveGamepad(
+        navigator.getGamepads(),
+        this._preferredGamepadIndex
       );
+      if (nextGamepad && nextGamepad.index !== this._activeGamepad?.index) {
+        this._emitControllerStatus(true, nextGamepad);
+      }
+      this._activeGamepad = nextGamepad;
+      const axes = Input.readGamepadAxes(this._activeGamepad);
+      if (axes.resetPressed && !this._gamepadResetPressed) {
+        document.dispatchEvent(new CustomEvent('car-reset'));
+        this.pulse(0.45, 80);
+      }
+      this._gamepadResetPressed = axes.resetPressed;
+      return axes;
+    }
 
-      requestAnimationFrame(dispatch);
-    };
+    async pulse(strength = 0.5, duration = 70) {
+      const gamepad = this._activeGamepad;
+      if (!gamepad) return false;
+      const actuator = gamepad.vibrationActuator || (gamepad.hapticActuators || [])[0];
+      if (!actuator || typeof actuator.playEffect !== 'function') return false;
+      try {
+        await actuator.playEffect('dual-rumble', {
+          duration,
+          startDelay: 0,
+          strongMagnitude: Math.min(1, strength),
+          weakMagnitude: Math.min(1, strength * 0.65),
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    }
 
-    requestAnimationFrame(dispatch);
+    _emitControllerStatus(connected, gamepad) {
+      const detail = {
+        connected,
+        label: Input.getGamepadLabel(gamepad),
+      };
+      root.XRRC_CONTROLLER_STATUS = detail;
+      document.dispatchEvent(new CustomEvent('controller-status', { detail }));
+    }
+
+    _resetInput() {
+      this._keys.clear();
+      this._touch.throttle = 0;
+      this._touch.steering = 0;
+      const knob = document.getElementById('joystick-knob');
+      if (knob) knob.style.transform = 'translate3d(0, 0, 0)';
+    }
+
+    _startLoop() {
+      const dispatch = () => {
+        const gamepad = this._readGamepad();
+        const axes = Input.mixAxes({
+          xr: root.XRRC_XR_INPUT,
+          keyboard: Input.readKeyboardAxes(this._keys),
+          touch: this._touch,
+          gamepad,
+          demo: root.XRRC_DEMO_INPUT,
+        });
+        document.dispatchEvent(new CustomEvent('car-input', { detail: axes }));
+        root.requestAnimationFrame(dispatch);
+      };
+      root.requestAnimationFrame(dispatch);
+    }
   }
-}
 
-window.addEventListener('DOMContentLoaded', () => {
-  window.controls = new Controls();
-});
+  root.addEventListener('DOMContentLoaded', () => {
+    root.controls = new Controls();
+  });
+})(window);

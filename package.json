@@ -6,15 +6,22 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node --test"
+    "test": "node --test test/*.test.js",
+    "test:e2e": "playwright test",
+    "test:e2e:update": "playwright test --update-snapshots",
+    "screenshots": "node scripts/capture-screenshots.js",
+    "check:syntax": "node --check server.js && node --check public/js/audio.js && node --check public/js/config.js && node --check public/js/controls-core.js && node --check public/js/controls.js && node --check public/js/game-core.js && node --check public/js/game.js && node --check public/js/i18n.js && node --check public/js/network.js && node --check public/js/xr-core.js",
+    "check": "npm run check:syntax && npm test"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "uuid": "^9.0.0",
     "ws": "^8.14.2"
   },
   "engines": {
     "node": ">=18.0.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
+  }
 }

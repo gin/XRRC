@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">XRRC racing mark</title>
+  <rect width="128" height="128" rx="22" fill="#24251f"/>
+  <path d="M12 87h104v23H12z" fill="#f1c644"/>
+  <path d="M12 87h13v11H12zm26 0h13v11H38zm26 0h13v11H64zm26 0h13v11H90zM25 98h13v12H25zm26 0h13v12H51zm26 0h13v12H77zm26 0h13v12h-13z" fill="#24251f"/>
+  <path d="M27 70h10l8-24h36l14 14h10l8 20H22z" fill="#e84a27"/>
+  <path d="M51 50h25l10 10H47z" fill="#b9d4ce"/>
+  <circle cx="42" cy="80" r="13" fill="#171814"/>
+  <circle cx="42" cy="80" r="5" fill="#f1c644"/>
+  <circle cx="94" cy="80" r="13" fill="#171814"/>
+  <circle cx="94" cy="80" r="5" fill="#f1c644"/>
+  <path d="M18 31h60" stroke="#f4ead2" stroke-width="9" stroke-linecap="square"/>
+  <path d="M18 18h91" stroke="#f1c644" stroke-width="7" stroke-linecap="square"/>
+</svg>
