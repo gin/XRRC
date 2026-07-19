@@ -5,7 +5,7 @@
    rc-car  –  A-Frame component for an RC car entity.
    ============================================================
    Schema:
-     color    {color}   – hex colour of the car body
+     color    {color}   – hex color of the car body
      isLocal  {boolean} – true for the player's own car; false for remote peers
      speed    {number}  – top forward speed in m/s
      turnSpeed{number}  – rotation speed in rad/s
