@@ -32,6 +32,7 @@ test('builds text-to-model payloads per kind', () => {
 
 test('validates task ids and normalizes task snapshots', () => {
   assert.equal(TripoCore.isTaskId('task_abc123'), true);
+  assert.equal(TripoCore.isTaskId('07764597-9c93-4eb9-92b6-4ea96a8c7d1a'), true);
   assert.equal(TripoCore.isTaskId('task_'), false);
   assert.equal(TripoCore.isTaskId('../etc/passwd'), false);
 
@@ -170,8 +171,14 @@ test('polls tasks without leaking upstream model urls', async () => {
   assert.equal(readyBody.imageUrl, 'https://cdn.example/render.png');
   assert.equal('modelUrl' in readyBody, false);
 
-  const bad = await fetch(`${enabledOrigin}/api/tripo/task/not-a-task`);
-  assert.equal(bad.status, 400);
+  // Real Tripo task ids are opaque UUIDs with no fixed prefix - a
+  // well-formed-but-unknown id must be forwarded upstream, not rejected
+  // locally (this was the reported "Invalid task id" regression).
+  const unknown = await fetch(`${enabledOrigin}/api/tripo/task/07764597-9c93-4eb9-92b6-4ea96a8c7d1a`);
+  assert.equal(unknown.status, 502);
+
+  const malformed = await fetch(`${enabledOrigin}/api/tripo/task/bad.id.value`);
+  assert.equal(malformed.status, 400);
 });
 
 test('proxies generated model binaries and caches them', async () => {

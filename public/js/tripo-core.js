@@ -68,8 +68,13 @@
     };
   }
 
+  // Tripo's real task_id is an opaque token (in practice a UUID, e.g.
+  // "07764597-9c93-4eb9-92b6-4ea96a8c7d1a") - despite the docs' illustrative
+  // "task_abc123" example, it carries no fixed prefix. Validate shape only
+  // (safe charset, bounded length) rather than assuming a literal prefix,
+  // so real ids aren't rejected before ever reaching Tripo.
   function isTaskId(value) {
-    return /^task_[A-Za-z0-9_-]{4,80}$/.test(String(value || ''));
+    return /^[A-Za-z0-9_-]{6,80}$/.test(String(value || ''));
   }
 
   // Trims a raw Tripo task response down to what the client needs. The
