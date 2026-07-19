@@ -260,8 +260,11 @@ function getSignalingUrl(room) {
     url.searchParams.set('room', room);
     return url.toString();
   }
-  if (location.protocol === 'http:' || location.hostname === 'localhost') {
-    return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?room=${encodeURIComponent(room)}`;
+  if (location.protocol === 'http:') {
+    return `ws://${location.host}/ws?room=${encodeURIComponent(room)}`;
+  }
+  if (location.hostname === 'localhost') {
+    return `wss://${location.host}/ws?room=${encodeURIComponent(room)}`;
   }
   return null;
 }
