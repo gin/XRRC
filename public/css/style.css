@@ -40,7 +40,7 @@ body {
 }
 
 /* ── Lobby panel ─────────────────────────────────────────── */
-#lobby {
+#lobby:not([hidden]) {
   position: absolute;
   inset: 0;
   display: flex;

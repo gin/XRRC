@@ -1,11 +1,54 @@
 /* jshint esversion: 11 */
 'use strict';
 
+import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.183.2/examples/jsm/loaders/GLTFLoader.js';
+
 const THREE = window.THREE;
 const TRACK_SIZE = 2.5;
 const remoteCars = new Map();
 let game;
 let networkManager = null;
+
+// Toy car models: each glb was authored with its nose facing +Z, but the
+// game's forward direction at yaw 0 is -Z, so loaded models get a 180°
+// yaw correction. Confirmed against front-wheel node positions and
+// isometric renders for every model in the set.
+const CAR_MODEL_FILES = [
+  'assets/cars/toy-car-1.glb',
+  'assets/cars/toy-car-2.glb',
+  'assets/cars/toy-car-3.glb',
+  'assets/cars/toy-car-4.glb',
+  'assets/cars/toy-car-taxi.glb',
+  'assets/cars/toy-car-cop.glb',
+  'assets/cars/car1.glb',
+];
+const CAR_LENGTH = 0.3; // target footprint length (meters), matches the old box car
+const CAR_MODEL_YAW_OFFSET = Math.PI;
+
+const gltfLoader = new GLTFLoader();
+const modelCache = new Map(); // file -> Promise<THREE.Object3D>
+
+function loadCarModel(file) {
+  if (!modelCache.has(file)) {
+    modelCache.set(
+      file,
+      new Promise((resolve, reject) => {
+        gltfLoader.load(file, (gltf) => resolve(gltf.scene), undefined, reject);
+      })
+    );
+  }
+  return modelCache.get(file);
+}
+
+function hashString(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) | 0;
+  return Math.abs(hash);
+}
+
+function pickCarModel(color) {
+  return CAR_MODEL_FILES[hashString(String(color)) % CAR_MODEL_FILES.length];
+}
 
 class Car {
   constructor(color, isLocal) {
@@ -16,13 +59,41 @@ class Car {
     this.steering = 0;
     this.broadcastTimer = 0;
     this.wheels = [];
-    this._build(color);
+    this._load(color);
 
     if (isLocal) {
       document.addEventListener('car-input', (event) => {
         this.throttle = event.detail.throttle;
         this.steering = event.detail.steering;
       });
+    }
+  }
+
+  async _load(color) {
+    const file = pickCarModel(color);
+    try {
+      const source = await loadCarModel(file);
+      const model = source.clone(true);
+      model.traverse((node) => {
+        if (!node.isMesh) return;
+        node.castShadow = true;
+        node.receiveShadow = true;
+        if (/wheel/i.test(node.name)) this.wheels.push(node);
+      });
+
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      model.position.set(-center.x, -box.min.y, -center.z);
+
+      const pivot = new THREE.Group();
+      pivot.rotation.y = CAR_MODEL_YAW_OFFSET;
+      pivot.scale.setScalar(size.z > 0 ? CAR_LENGTH / size.z : 1);
+      pivot.add(model);
+      this.group.add(pivot);
+    } catch (err) {
+      console.error(`[car] failed to load ${file}, using fallback geometry`, err);
+      this._buildFallback(color);
     }
   }
 
@@ -37,7 +108,7 @@ class Car {
     return mesh;
   }
 
-  _build(color) {
+  _buildFallback(color) {
     this._box(0.16, 0.055, 0.28, color, 0, 0.037);
     this._box(0.12, 0.048, 0.12, color, 0, 0.088, 0.025);
     this._box(0.14, 0.04, 0.015, 0x222222, 0, 0.08, -0.12);

@@ -42,12 +42,23 @@ after signaling, but fully serverless discovery is not available in browsers.
 
 | File | Purpose |
 |------|---------|
-| `public/index.html` | AR-mode and track-prop selection, canvas, and HUD |
-| `public/js/game.js` | Three.js scene, cars, track props, WebXR hit testing, and 8th Wall pipeline |
+| `public/index.html` | AR-mode and track-prop selection, canvas, HUD, and the `three` import map |
+| `public/js/game.js` | Three.js scene, GLTF car models, track props, WebXR hit testing, and 8th Wall pipeline |
 | `public/js/controls.js` | Touch joystick and keyboard controls |
 | `public/js/network.js` | WebSocket signaling and WebRTC data channels |
+| `public/assets/cars/*.glb` | Car models loaded at runtime via `GLTFLoader` |
 | `server.js` | Static local server and optional multiplayer signaling |
 | `.github/workflows/pages.yml` | Static GitHub Pages deployment |
+
+### Car models
+
+`public/js/game.js` loads one of the `.glb` files in `public/assets/cars/` per car, chosen deterministically
+from a hash of the car's player color so every client renders the same model for a given peer without any
+extra network protocol. Each model is fetched once via `GLTFLoader`, cached, and cloned per car instance; the
+clone is auto-centered, grounded, uniformly scaled to a ~0.3 m footprint, and yaw-corrected 180° because the
+source models face +Z while the game's forward direction is -Z. Any node with "wheel" in its name is spun
+during `Car.update()`; models without named wheel nodes simply skip that animation. If a model fails to load,
+`Car` falls back to the original procedural box car so gameplay never breaks.
 
 ## 8th Wall licensing
 
@@ -70,3 +81,7 @@ respective licenses; the SLAM binary is subject to the
 - [x] Add selectable jumps and loops
 - [x] Support GitHub Pages and serverless-safe single-player
 - [x] Retain optional WebRTC multiplayer
+
+## Asset Sources
+- [Tripo](https://studio.tripo3d.ai/3d-model/d2246fae-8c19-4cdc-84d6-7a23525b724e?invite_code=VPRYX0): `car*.glb`
+- [Pixabay](https://pixabay.com/3d-models/search/glb%20car/): `toy-car*.glb`
