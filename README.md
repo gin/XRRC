@@ -1,88 +1,72 @@
 # XRRC – WebAR RC Cars 🏎️
 
-A browser-based, multiplayer augmented-reality RC car game.  
-Drive miniature RC cars on any flat surface detected by your phone's camera.  
-Multiple players in the same **room** see each other's cars in real-time via WebRTC peer-to-peer data channels.
+A raw Three.js RC-car game that runs in native WebXR, 8th Wall AR, or a desktop 3D fallback.
 
----
+## Game 2.0
 
-## Features
+- **Native WebXR first** – the load screen detects immersive AR and recommends it when available.
+- **8th Wall fallback** – loads the current 8th Wall SLAM camera pipeline on demand, with no legacy app key.
+- **Raw Three.js** – cars, track, lighting, physics, hit testing, and rendering no longer use A-Frame.
+- **Track props** – choose a jump and/or loop before starting.
+- **Optional multiplayer** – WebRTC rooms use the bundled WebSocket signaling server.
+- **Static hosting** – relative asset URLs and single-player fallback work at a domain root or repository subpath.
 
-- **WebXR AR** – hit-test surface detection places the track in the real world (requires Android Chrome or compatible browser).
-- **Desktop fallback** – a standard 3D view for browsers without WebXR AR support.
-- **WebRTC multiplayer** – peer-to-peer car-state broadcast at ~20 Hz over unreliable data channels.
-- **Room system** – share a URL with `?room=<name>` to invite friends to the same session.
-- **Virtual joystick** – on-screen dual-axis joystick for mobile; WASD / arrow keys on desktop.
+## Run locally
 
----
-
-## Quick Start
-
-### Prerequisites
-
-- [Node.js](https://nodejs.org/) ≥ 18
-
-### Install & Run
+Requires Node.js 18 or newer.
 
 ```bash
 npm install
 npm start
 ```
 
-The server starts on **http://localhost:3000** (or `$PORT`).
+Open <http://localhost:3000>. On a supported secure origin, choose **Start WebXR**; otherwise choose
+**Use 8th Wall** or **Play in 3D**.
 
-### Play in AR (Android Chrome)
+## GitHub Pages
 
-1. Open `http://<your-local-ip>:3000` on your Android phone.
-2. Enter a room name (or leave as `default`) and tap **Start AR**.
-3. Point the camera at a flat surface until the white reticle appears.
-4. Tap to place the track.
-5. Drive with the on-screen joystick.
+The Pages workflow publishes `public/` whenever `main` is updated. In repository settings, set
+**Pages → Build and deployment → Source** to **GitHub Actions**. Pages runs as single-player by default
+because a static host cannot provide WebSocket signaling.
 
-### Share with Friends
+To enable rooms on a static deployment, host `server.js` separately and add its secure WebSocket URL:
 
-After the game loads, tap **Copy room link** and share it.  
-Both players must be able to reach the same signaling server.
+```text
+https://example.github.io/XRRC/?signal=wss%3A%2F%2Fsignal.example.com%2Fws&room=friends
+```
 
----
+The room parameter is added to the signaling URL automatically. WebRTC carries gameplay peer-to-peer
+after signaling, but fully serverless discovery is not available in browsers.
 
 ## Architecture
 
-```
-browser (client)                server (Node.js)
-┌──────────────────────┐        ┌──────────────────────┐
-│  index.html          │        │  server.js            │
-│  ├─ A-Frame scene    │◄─WS───►│  Express static serve │
-│  ├─ car-component.js │        │  WebSocket signaling  │
-│  ├─ controls.js      │        │  (offer/answer/ICE)   │
-│  ├─ network.js       │        └──────────────────────┘
-│  └─ app.js           │
-│         │            │
-│    WebRTC P2P ───────┼──────► other browsers (peers)
-└──────────────────────┘
-```
-
 | File | Purpose |
 |------|---------|
-| `server.js` | Express + ws signaling server; routes WebRTC SDP & ICE between peers |
-| `public/index.html` | A-Frame scene, HUD overlay, lobby UI |
-| `public/js/car-component.js` | `rc-car` A-Frame component (mesh, kinematic physics, interpolation) + `ar-reticle` + `track-borders` |
-| `public/js/controls.js` | Virtual joystick (touch) and WASD/arrow-key input; fires `car-input` events |
-| `public/js/network.js` | `NetworkManager` – WebSocket signaling client + WebRTC peer lifecycle + data-channel broadcast |
-| `public/js/app.js` | Orchestration: lobby → AR session → placement → network wiring |
-| `public/css/style.css` | Overlay HUD, joystick, lobby panel styles |
+| `public/index.html` | AR-mode and track-prop selection, canvas, and HUD |
+| `public/js/game.js` | Three.js scene, cars, track props, WebXR hit testing, and 8th Wall pipeline |
+| `public/js/controls.js` | Touch joystick and keyboard controls |
+| `public/js/network.js` | WebSocket signaling and WebRTC data channels |
+| `server.js` | Static local server and optional multiplayer signaling |
+| `.github/workflows/pages.yml` | Static GitHub Pages deployment |
 
----
+## 8th Wall licensing
 
-## Environment Variables
+XRRC loads the 8th Wall engine binary, XRExtras, and Landing Page packages from jsDelivr only when
+8th Wall mode is selected. The open-source packages are provided by Niantic Spatial under their
+respective licenses; the SLAM binary is subject to the
+[Niantic Spatial XR Engine License](https://github.com/8thwall/engine/blob/main/LICENSE).
+
+## Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PORT` | `3000` | HTTP / WS listen port |
+| `PORT` | `3000` | Local HTTP/WebSocket server port |
 
----
+## Game 2.0 progress
 
-## Inspired By
-
-- [klausw/a-frame-car-sample](https://github.com/klausw/a-frame-car-sample)
-- [8thwall/8thwall](https://github.com/8thwall/8thwall)
+- [x] Replace A-Frame with raw Three.js
+- [x] Detect and prioritize native WebXR
+- [x] Add current 8th Wall engine support
+- [x] Add selectable jumps and loops
+- [x] Support GitHub Pages and serverless-safe single-player
+- [x] Retain optional WebRTC multiplayer
