@@ -935,7 +935,8 @@ label {
 
 #hud.is-ready .hud-topbar,
 #hud.is-ready .key-hint,
-#hud.is-ready #joystick-zone {
+#hud.is-ready #joystick-zone,
+#hud.is-ready .vehicle-bay {
   opacity: 1;
   transform: translateY(0);
 }
@@ -1202,6 +1203,66 @@ label {
 .controller-status[data-state="disconnected"] {
   border-color: #ffad9b;
   color: #ffad9b;
+}
+
+.vehicle-bay {
+  position: absolute;
+  left: var(--safe-left);
+  bottom: var(--safe-bottom);
+  display: flex;
+  gap: 0.32rem;
+  max-width: min(58vw, 21rem);
+  padding: 0.32rem;
+  overflow-x: auto;
+  background: rgb(36 37 31 / 72%);
+  opacity: 0;
+  pointer-events: auto;
+  scrollbar-width: none;
+  transform: translateY(1rem);
+  transition: opacity 480ms 100ms var(--ease-out), transform 480ms 100ms var(--ease-out);
+}
+
+.vehicle-bay::-webkit-scrollbar {
+  display: none;
+}
+
+.vehicle-slot {
+  position: relative;
+  display: grid;
+  flex: 0 0 auto;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid rgb(244 234 210 / 22%);
+  place-items: center;
+  color: rgb(244 234 210 / 55%);
+  background: rgb(244 234 210 / 4%);
+  cursor: pointer;
+  transition: color 160ms var(--ease-state), background 160ms var(--ease-state), border-color 160ms var(--ease-state), transform 100ms var(--ease-out);
+}
+
+.vehicle-slot .vehicle-glyph {
+  width: 1.6rem;
+  height: 0.9rem;
+}
+
+.vehicle-slot:hover {
+  color: var(--paper);
+}
+
+.vehicle-slot:active {
+  transform: scale(0.92);
+}
+
+.vehicle-slot.is-active {
+  border-color: var(--yellow);
+  color: var(--ink);
+  background: var(--yellow);
+}
+
+.vehicle-slot.is-parked {
+  border-style: dashed;
+  color: rgb(174 228 185 / 78%);
+  opacity: 0.7;
 }
 
 kbd {

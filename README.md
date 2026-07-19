@@ -59,6 +59,19 @@ GLB skins instead: the same rally handling, but `Vehicle.setType()` swaps in a `
 Vehicle selection - including GLB skins - is broadcast with each network state update, so peers render
 the same model.
 
+### In-race vehicle bay
+
+A second vehicle bay sits at the bottom-left of the HUD during a race, listing all 13 vehicles (7
+physics types + 6 GLB skins). Clicking an available slot summons that vehicle onto the track at its own
+fixed pit-stall position and hands it control; the previously controlled vehicle is left parked exactly
+where it stopped (`Vehicle.setActive(false)` zeroes its input but keeps its idle animation running).
+Clicking a parked vehicle's slot again recalls it, freeing the slot and disposing its geometry; clicking
+the currently controlled vehicle's own slot is a no-op; you can't recall the vehicle you're driving.
+`Game.worldCars` (type -> `Vehicle`) tracks everything placed on the track, and `Game.update()` steps
+every one of them each frame so parked vehicles keep their idle motion; only the controlled vehicle's
+`Vehicle.active` flag is true, so only it broadcasts network state, dust/smoke/camera effects, and HUD
+telemetry.
+
 ## 8th Wall licensing
 
 XRRC loads the 8th Wall engine binary, XRExtras, and Landing Page packages from jsDelivr only when

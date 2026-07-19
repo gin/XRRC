@@ -51,6 +51,23 @@ function normalizeVehicleSelection(value) {
   return Object.hasOwn(GLB_SKINS, value) ? value : Core.normalizeVehicleType(value);
 }
 
+// Canonical selection order: the 7 procedural physics types, then the 6
+// GLB skins - matches the lobby's vehicle bay markup and drives the
+// in-race vehicle bay's slot order and each vehicle's fixed pit position.
+const VEHICLE_TYPES = Object.freeze([...Object.keys(Core.VEHICLE_SPECS), ...Object.keys(GLB_SKINS)]);
+
+// Every selectable vehicle gets a fixed home spot near the start grid so
+// summoning/recalling never has to reason about what else is parked.
+function pitStallPosition(type) {
+  const index = VEHICLE_TYPES.indexOf(type);
+  const cols = VEHICLE_TYPES.length;
+  return {
+    x: START_GRID.x + (index - (cols - 1) / 2) * 0.36,
+    z: START_GRID.z + 0.55,
+    heading: START_GRID.heading,
+  };
+}
+
 function prefersQuestQuality() {
   const requestedQuality = new URLSearchParams(window.location.search).get('quality');
   return (
@@ -662,7 +679,7 @@ class Vehicle {
     }
 
     this.broadcastTimer += delta;
-    if (this.broadcastTimer >= 0.05 && networkManager) {
+    if (this.active && this.broadcastTimer >= 0.05 && networkManager) {
       this.broadcastTimer = 0;
       networkManager.broadcastState({
         type: this.type,
@@ -756,6 +773,11 @@ class Vehicle {
     );
     return null;
   }
+
+  dispose() {
+    this._clearVisual();
+    if (this.group.parent) this.group.parent.remove(this.group);
+  }
 }
 
 class Game {
@@ -804,15 +826,96 @@ class Game {
     if (runtime) this.gameRoot.scale.setScalar(0.48);
     this.scene.add(this.gameRoot);
     this._buildTrack();
-    this.localCar = new Vehicle(0xe84a27, true, props.vehicle);
-    this.gameRoot.add(this.localCar.group);
+    this.worldCars = new Map(); // vehicle type/skin -> Vehicle placed on the track
     this.particles = new ParticleField(this.gameRoot, this.isQuest ? 96 : 180);
+    this.localCar = this._summonVehicle(props.vehicle, { silent: true });
     this.reticle = this._createReticle();
     this.scene.add(this.reticle);
     this._addLights();
+    this._initVehicleBay();
 
     this._resizeHandler = () => this.resize();
     window.addEventListener('resize', this._resizeHandler);
+  }
+
+  // Places a vehicle on the track and gives it control. Any previously
+  // controlled vehicle is left parked exactly where it stopped.
+  _summonVehicle(type, { silent = false } = {}) {
+    const nextType = normalizeVehicleSelection(type);
+    if (this.worldCars.has(nextType)) return this.worldCars.get(nextType);
+
+    if (this.localCar) this.localCar.setActive(false);
+
+    const car = new Vehicle(0xe84a27, true, nextType);
+    const spot = pitStallPosition(nextType);
+    car.reset(spot.x, spot.z, spot.heading);
+    car.setActive(true);
+    this.gameRoot.add(car.group);
+    this.worldCars.set(nextType, car);
+    this.localCar = car;
+
+    const label = document.getElementById('vehicle-label');
+    if (label) label.textContent = I18n.t(`vehicle.${nextType}`);
+
+    if (!silent) {
+      this.particles.burst(
+        car.group.position.clone().add(new THREE.Vector3(0, 0.1, 0)),
+        [0xf1c644, 0xe84a27, 0xf4ead2],
+        14,
+        0.4
+      );
+      audioManager.playCue('toggle');
+    }
+    this._syncVehicleBay();
+    return car;
+  }
+
+  // Removes a parked (non-controlled) vehicle from the track, freeing its
+  // vehicle-bay slot. The currently controlled vehicle can't recall itself.
+  _recallVehicle(type) {
+    const car = this.worldCars.get(type);
+    if (!car || car === this.localCar) return;
+    car.dispose();
+    this.worldCars.delete(type);
+    this._syncVehicleBay();
+  }
+
+  _onVehicleSlotClick(type) {
+    if (this.worldCars.has(type)) this._recallVehicle(type);
+    else this._summonVehicle(type);
+  }
+
+  _initVehicleBay() {
+    const bay = document.getElementById('vehicle-bay');
+    if (!bay) return;
+    bay.innerHTML = '';
+    this.vehicleSlots = new Map();
+    for (const type of VEHICLE_TYPES) {
+      const slot = document.createElement('button');
+      slot.type = 'button';
+      slot.className = 'vehicle-slot';
+      slot.setAttribute('role', 'option');
+      slot.setAttribute('aria-label', I18n.t(`vehicle.${type}`));
+      const glyph = document.createElement('span');
+      glyph.className = 'vehicle-glyph';
+      glyph.setAttribute('aria-hidden', 'true');
+      slot.append(glyph);
+      slot.addEventListener('click', () => this._onVehicleSlotClick(type));
+      bay.appendChild(slot);
+      this.vehicleSlots.set(type, slot);
+    }
+    this._syncVehicleBay();
+  }
+
+  _syncVehicleBay() {
+    if (!this.vehicleSlots) return;
+    for (const [type, slot] of this.vehicleSlots) {
+      const car = this.worldCars.get(type);
+      const isActive = car === this.localCar;
+      slot.classList.toggle('is-active', isActive);
+      slot.classList.toggle('is-parked', Boolean(car) && !isActive);
+      slot.setAttribute('aria-selected', String(isActive));
+    }
   }
 
   _standardMaterial(color, roughness = 0.72, metalness = 0.08) {
@@ -1472,7 +1575,11 @@ class Game {
 
   update() {
     const delta = Math.min(this.clock.getDelta(), 0.05);
-    const telemetry = this.localCar.update(delta);
+    let telemetry = null;
+    for (const car of this.worldCars.values()) {
+      const result = car.update(delta);
+      if (car === this.localCar) telemetry = result;
+    }
     for (const car of remoteCars.values()) car.update(delta);
     this.particles.update(delta);
     this.collisionCooldown = Math.max(0, this.collisionCooldown - delta);
@@ -1837,9 +1944,6 @@ function enterGame(runtime = null) {
       };
     },
   });
-  document.getElementById('vehicle-label').textContent = I18n.t(
-    `vehicle.${game.localCar.type}`
-  );
   startNetwork(room, signalValue);
   setupShareLink(room, signalValue);
   return game;
