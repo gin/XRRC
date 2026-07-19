@@ -50,7 +50,43 @@ function loadGLBModel(file) {
 // GLB skin id; GLB skins pass through untouched so Vehicle can load them,
 // everything else is sanitized by the physics layer's normalizer.
 function normalizeVehicleSelection(value) {
-  return Object.hasOwn(GLB_SKINS, value) ? value : Core.normalizeVehicleType(value);
+  return skinSpec(value) ? value : Core.normalizeVehicleType(value);
+}
+
+// -- Dream lab (Tripo AI generation) --------------------------------------
+// A Tripo-enabled XRRC server can generate one custom vehicle skin and a
+// set of map-themed props per player. The vehicle rides the same GLB-skin
+// pipeline as the bundled toy cars; props are placed on fixed grass and
+// infield anchors when the game builds (or as soon as generation lands).
+const TripoCore = window.XRRCTripoCore;
+const CUSTOM_VEHICLE_ID = 'dream-car';
+const DREAM_VEHICLE_STORE = 'xrrc-dream-vehicle';
+const DREAM_MAP_STORE = 'xrrc-dream-map';
+// Anchor spots per prop role, chosen clear of the road ribbon, trees,
+// tire walls, barriers, billboard, start grid, and the stunt lane.
+const DREAM_PROP_ANCHORS = Object.freeze({
+  landmark: { size: 1.0, spots: [[4.02, 0.95, -Math.PI / 3]] },
+  decor: { size: 0.62, spots: [[-4.02, -1.85, Math.PI / 5], [2.3, -3.08, -Math.PI / 8]] },
+  marker: { size: 0.4, spots: [[0.2, -1.12, Math.PI / 7], [-0.62, 1.18, -Math.PI / 4]] },
+});
+let dreamApiBase = null; // origin of the Tripo-enabled server, null = unavailable
+let customSkin = null; // { file, taskId, label, imageUrl } once a dream car exists
+const dreamProps = new Map(); // role -> { role, taskId, status, file, imageUrl }
+
+function skinSpec(type) {
+  if (Object.hasOwn(GLB_SKINS, type)) return GLB_SKINS[type];
+  if (type === CUSTOM_VEHICLE_ID && customSkin) return customSkin;
+  return null;
+}
+
+function vehicleDisplayName(type) {
+  if (type === CUSTOM_VEHICLE_ID && customSkin) return customSkin.label;
+  return I18n.t(`vehicle.${type}`);
+}
+
+// The dream car joins the selectable list only once it has been generated.
+function selectableVehicleTypes() {
+  return customSkin ? [...VEHICLE_TYPES, CUSTOM_VEHICLE_ID] : VEHICLE_TYPES;
 }
 
 // Canonical selection order: the 7 procedural physics types, then the 6
@@ -61,8 +97,9 @@ const VEHICLE_TYPES = Object.freeze([...Object.keys(Core.VEHICLE_SPECS), ...Obje
 // Every selectable vehicle gets a fixed home spot near the start grid so
 // summoning/recalling never has to reason about what else is parked.
 function pitStallPosition(type) {
-  const index = VEHICLE_TYPES.indexOf(type);
-  const cols = VEHICLE_TYPES.length;
+  const types = selectableVehicleTypes();
+  const index = types.indexOf(type);
+  const cols = types.length;
   return {
     x: START_GRID.x + (index - (cols - 1) / 2) * 0.36,
     z: START_GRID.z + 0.55,
@@ -309,6 +346,7 @@ class Vehicle {
     this.remoteReceivedAt = 0;
     this._bodyTilt = 0;
     this.knockback = { x: 0, z: 0 };
+    this.skinOverride = null; // remote peers' dream-car skins resolve per-instance
     this.modelReady = Promise.resolve();
     this.setType(type);
     this.reset(
@@ -420,7 +458,10 @@ class Vehicle {
   }
 
   setType(type) {
-    const nextType = normalizeVehicleSelection(type);
+    // A remote peer's dream car carries its own skin; everything else
+    // resolves through the shared skin registry / physics normalizer.
+    const hasOverride = Boolean(this.skinOverride) && type === CUSTOM_VEHICLE_ID;
+    const nextType = hasOverride ? CUSTOM_VEHICLE_ID : normalizeVehicleSelection(type);
     if (this.type === nextType && this.visual.children.length > 0) return;
 
     this._clearVisual();
@@ -428,7 +469,7 @@ class Vehicle {
     this.spec = Core.getVehicleSpec(nextType);
     this.group.position.y = this.spec.rideHeight;
 
-    const skin = GLB_SKINS[nextType];
+    const skin = hasOverride ? this.skinOverride : skinSpec(nextType);
     if (skin) {
       // Procedural placeholder so the car is visible immediately; swapped
       // for the real model once the glb finishes loading.
@@ -799,6 +840,10 @@ class Vehicle {
         v: this.velocity,
         throttle: this.throttle,
         steering: this.steering,
+        // Peers resolve the skin against their own Tripo-enabled server.
+        ...(this.type === CUSTOM_VEHICLE_ID && customSkin
+          ? { skinTask: customSkin.taskId }
+          : null),
       });
       this.sequence += 1;
     }
@@ -844,6 +889,17 @@ class Vehicle {
   applyRemoteState(state) {
     if (!Core.shouldAcceptNetworkState(this.lastRemoteSequence, state)) return false;
     this.lastRemoteSequence = state.seq;
+    if (
+      state.type === CUSTOM_VEHICLE_ID &&
+      dreamApiBase &&
+      TripoCore.isTaskId(state.skinTask)
+    ) {
+      const file = `${dreamApiBase}/api/tripo/model/${state.skinTask}`;
+      if (!this.skinOverride || this.skinOverride.file !== file) {
+        this.skinOverride = { file };
+        this.type = null; // force a rebuild with the newly announced skin
+      }
+    }
     this.setType(state.type);
     this.remoteTarget = {
       ...state,
@@ -969,6 +1025,414 @@ function renderVehicleThumbnail(type) {
   return promise;
 }
 
+// -- Dream lab UI ----------------------------------------------------------
+// Lobby-side Tripo generation: prompt a custom vehicle (shown spinning on a
+// display plate once ready) and a map theme whose props land on the track.
+let dreamRig = null;
+let dreamPreviewToken = 0;
+
+async function resolveDreamApiBase() {
+  const candidates = [];
+  if (location.protocol === 'http:' || location.protocol === 'https:') {
+    candidates.push(location.origin);
+  }
+  const signalValue = getSignalValue();
+  if (signalValue) {
+    try {
+      const healthUrl = Config.getHealthUrl(signalValue, location.protocol);
+      if (healthUrl) candidates.push(new URL(healthUrl).origin);
+    } catch {
+      // Malformed relay value; same-origin probe may still succeed.
+    }
+  }
+  for (const base of candidates) {
+    try {
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), 4000);
+      const response = await fetch(`${base}/api/tripo/status`, { signal: controller.signal });
+      window.clearTimeout(timer);
+      if (!response.ok) continue;
+      const body = await response.json();
+      if (body.enabled) return base;
+    } catch {
+      // Static host or unreachable relay; try the next candidate.
+    }
+  }
+  return null;
+}
+
+async function fetchDreamJson(path, init) {
+  const response = await fetch(`${dreamApiBase}${path}`, init);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
+  return body;
+}
+
+async function trackDreamTask(taskId, onProgress) {
+  const deadline = Date.now() + TripoCore.POLL_TIMEOUT_MS;
+  for (;;) {
+    const task = await fetchDreamJson(`/api/tripo/task/${taskId}`);
+    if (task.status === 'success') return task;
+    if (task.status === 'failed' || task.status === 'cancelled') {
+      throw new Error(I18n.t('dream.taskFailed'));
+    }
+    if (onProgress) onProgress(task);
+    if (Date.now() > deadline) throw new Error(I18n.t('dream.taskTimeout'));
+    await new Promise((resolve) => window.setTimeout(resolve, TripoCore.POLL_INTERVAL_MS));
+  }
+}
+
+function setDreamStatus(id, text, state = '') {
+  const element = document.getElementById(id);
+  element.textContent = text;
+  if (state) element.dataset.state = state;
+  else delete element.dataset.state;
+}
+
+function upsertDreamVehicleToggle() {
+  const rail = document.querySelector('.vehicle-rail');
+  if (!rail || !customSkin) return;
+  let toggle = document.getElementById('dream-vehicle-toggle');
+  if (!toggle) {
+    toggle = document.createElement('label');
+    toggle.className = 'vehicle-toggle';
+    toggle.id = 'dream-vehicle-toggle';
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'vehicle';
+    input.value = CUSTOM_VEHICLE_ID;
+    const glyph = document.createElement('span');
+    glyph.className = 'vehicle-glyph';
+    glyph.setAttribute('aria-hidden', 'true');
+    toggle.append(input, glyph, document.createElement('strong'));
+    rail.appendChild(toggle);
+  }
+  toggle.querySelector('strong').textContent = customSkin.label;
+  const glyph = toggle.querySelector('.vehicle-glyph');
+  glyph.classList.toggle('dream-glyph', Boolean(customSkin.imageUrl));
+  glyph.style.backgroundImage = customSkin.imageUrl ? `url("${customSkin.imageUrl}")` : '';
+  toggle.querySelector('input').checked = true;
+  toggle.scrollIntoView({ block: 'nearest', inline: 'center' });
+}
+
+function ensureDreamRig() {
+  if (dreamRig) return dreamRig;
+  const canvas = document.getElementById('dream-plate-canvas');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(canvas.width, canvas.height, false);
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 3));
+  const sun = new THREE.DirectionalLight(0xffffff, 2.4);
+  sun.position.set(2, 4, 3);
+  scene.add(sun);
+  const camera = new THREE.PerspectiveCamera(32, canvas.width / canvas.height, 0.01, 50);
+  // The display plate: dark turntable with a yellow rim, car sits on top.
+  const turntable = new THREE.Group();
+  const plate = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.34, 0.37, 0.035, 48),
+    new THREE.MeshStandardMaterial({ color: 0x34362f, roughness: 0.85, metalness: 0.05 })
+  );
+  plate.position.y = -0.0175;
+  const rim = new THREE.Mesh(
+    new THREE.TorusGeometry(0.345, 0.012, 10, 48),
+    new THREE.MeshStandardMaterial({ color: 0xf1c644, roughness: 0.55 })
+  );
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = 0.002;
+  turntable.add(plate, rim);
+  scene.add(turntable);
+  dreamRig = { renderer, scene, camera, turntable, carGroup: null, raf: 0, last: 0 };
+  return dreamRig;
+}
+
+function startDreamPreviewLoop() {
+  const rig = dreamRig;
+  if (!rig || rig.raf || !rig.carGroup) return;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    rig.renderer.render(rig.scene, rig.camera);
+    return;
+  }
+  rig.last = performance.now();
+  const step = (now) => {
+    rig.raf = 0;
+    if (document.getElementById('lobby').hidden || !rig.carGroup) return;
+    const delta = Math.min((now - rig.last) / 1000, 0.1);
+    rig.last = now;
+    rig.turntable.rotation.y += delta * 0.55;
+    rig.renderer.render(rig.scene, rig.camera);
+    rig.raf = requestAnimationFrame(step);
+  };
+  rig.raf = requestAnimationFrame(step);
+}
+
+async function showDreamCarPreview() {
+  if (!customSkin) return;
+  const token = ++dreamPreviewToken;
+  const rig = ensureDreamRig();
+  document.getElementById('dream-vehicle-preview').hidden = false;
+  document.getElementById('dream-vehicle-name').textContent = customSkin.label;
+  const car = new Vehicle(0xe84a27, false, CUSTOM_VEHICLE_ID);
+  await car.modelReady;
+  if (token !== dreamPreviewToken) {
+    car.dispose();
+    return;
+  }
+  if (rig.carGroup) rig.turntable.remove(rig.carGroup);
+  car.group.position.set(0, 0, 0);
+  car.group.rotation.set(0, 0, 0);
+  rig.carGroup = car.group;
+  rig.turntable.add(car.group);
+  const box = new THREE.Box3().setFromObject(rig.turntable);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  rig.camera.position.set(
+    center.x + maxDim * 1.15,
+    center.y + maxDim * 0.78,
+    center.z + maxDim * 1.15
+  );
+  rig.camera.lookAt(center.x, center.y * 0.8, center.z);
+  rig.camera.updateProjectionMatrix();
+  rig.renderer.render(rig.scene, rig.camera);
+  startDreamPreviewLoop();
+}
+
+function persistDreamVehicle(entry) {
+  try {
+    localStorage.setItem(DREAM_VEHICLE_STORE, JSON.stringify(entry));
+  } catch {
+    // Storage full or blocked; the car still works for this session.
+  }
+}
+
+function persistDreamMap(theme) {
+  try {
+    localStorage.setItem(DREAM_MAP_STORE, JSON.stringify({
+      theme,
+      props: Array.from(dreamProps.values(), ({ role, taskId }) => ({ role, taskId })),
+    }));
+  } catch {
+    // Storage full or blocked; props still work for this session.
+  }
+}
+
+function registerDreamVehicle({ taskId, label, imageUrl, prompt }) {
+  customSkin = {
+    file: `${dreamApiBase}/api/tripo/model/${taskId}`,
+    taskId,
+    label,
+    imageUrl: imageUrl || '',
+  };
+  thumbnailCache.delete(CUSTOM_VEHICLE_ID);
+  persistDreamVehicle({ taskId, label, imageUrl: customSkin.imageUrl, prompt });
+  upsertDreamVehicleToggle();
+  showDreamCarPreview();
+  if (game) game._initVehicleBay();
+}
+
+async function generateDreamVehicle() {
+  const input = document.getElementById('dream-vehicle-input');
+  const button = document.getElementById('dream-vehicle-btn');
+  const text = TripoCore.cleanPromptText(input.value);
+  if (!text || !dreamApiBase || button.disabled) return;
+  button.disabled = true;
+  setDreamStatus('dream-vehicle-status', I18n.t('dream.sending'));
+  try {
+    const { tasks } = await fetchDreamJson('/api/tripo/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'vehicle', text }),
+    });
+    const taskId = tasks[0].taskId;
+    const task = await trackDreamTask(taskId, ({ status, progress }) => {
+      setDreamStatus(
+        'dream-vehicle-status',
+        I18n.t(status === 'queued' ? 'dream.queued' : 'dream.progress', { progress })
+      );
+    });
+    registerDreamVehicle({
+      taskId,
+      label: TripoCore.shortLabel(text, I18n.t('vehicle.dream-car')),
+      imageUrl: task.imageUrl,
+      prompt: text,
+    });
+    setDreamStatus('dream-vehicle-status', I18n.t('dream.vehicleReady'), 'done');
+  } catch (error) {
+    setDreamStatus('dream-vehicle-status', I18n.t('dream.error', { message: error.message }), 'error');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function createDreamPropCard(strip, role) {
+  const element = document.createElement('figure');
+  element.className = 'dream-prop';
+  const image = document.createElement('img');
+  image.alt = '';
+  image.hidden = true;
+  const title = document.createElement('strong');
+  title.textContent = I18n.t(`dream.role.${role}`);
+  const status = document.createElement('small');
+  status.textContent = I18n.t('dream.queued', { progress: 0 });
+  element.append(image, title, status);
+  strip.appendChild(element);
+  return { element, image, status };
+}
+
+function markDreamPropCard(card, prop) {
+  if (prop.imageUrl) {
+    card.image.src = prop.imageUrl;
+    card.image.hidden = false;
+  }
+  card.element.classList.add('is-ready');
+  card.status.textContent = I18n.t('dream.propReady');
+}
+
+async function generateDreamMap() {
+  const input = document.getElementById('dream-map-input');
+  const button = document.getElementById('dream-map-btn');
+  const theme = TripoCore.cleanPromptText(input.value);
+  if (!theme || !dreamApiBase || button.disabled) return;
+  button.disabled = true;
+  setDreamStatus('dream-map-status', I18n.t('dream.sending'));
+  const strip = document.getElementById('dream-prop-strip');
+  strip.hidden = false;
+  strip.innerHTML = '';
+  dreamProps.clear();
+  try {
+    const { tasks } = await fetchDreamJson('/api/tripo/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'map', text: theme }),
+    });
+    const cards = new Map();
+    for (const { role, taskId } of tasks) {
+      dreamProps.set(role, {
+        role,
+        taskId,
+        status: 'pending',
+        file: `${dreamApiBase}/api/tripo/model/${taskId}`,
+        imageUrl: '',
+      });
+      cards.set(role, createDreamPropCard(strip, role));
+    }
+    persistDreamMap(theme);
+    const results = await Promise.all(tasks.map(async ({ role, taskId }) => {
+      const card = cards.get(role);
+      const prop = dreamProps.get(role);
+      try {
+        const task = await trackDreamTask(taskId, ({ progress }) => {
+          card.status.textContent = I18n.t('dream.progressShort', { progress });
+        });
+        prop.status = 'success';
+        prop.imageUrl = task.imageUrl || '';
+        markDreamPropCard(card, prop);
+        if (game) game._placeDreamProp(prop);
+        return true;
+      } catch (error) {
+        prop.status = 'failed';
+        card.element.classList.add('is-failed');
+        card.status.textContent = error.message;
+        return false;
+      }
+    }));
+    const succeeded = results.filter(Boolean).length;
+    if (succeeded > 0) {
+      setDreamStatus('dream-map-status', I18n.t('dream.mapReady'), 'done');
+    } else {
+      setDreamStatus('dream-map-status', I18n.t('dream.taskFailed'), 'error');
+    }
+  } catch (error) {
+    setDreamStatus('dream-map-status', I18n.t('dream.error', { message: error.message }), 'error');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function restoreDreamLab() {
+  let storedVehicle = null;
+  let storedMap = null;
+  try {
+    storedVehicle = JSON.parse(localStorage.getItem(DREAM_VEHICLE_STORE) || 'null');
+    storedMap = JSON.parse(localStorage.getItem(DREAM_MAP_STORE) || 'null');
+  } catch {
+    // Corrupt storage; treat as empty.
+  }
+  if (storedVehicle && TripoCore.isTaskId(storedVehicle.taskId)) {
+    try {
+      const task = await fetchDreamJson(`/api/tripo/task/${storedVehicle.taskId}`);
+      if (task.status === 'success') {
+        if (storedVehicle.prompt) {
+          document.getElementById('dream-vehicle-input').value = storedVehicle.prompt;
+        }
+        registerDreamVehicle({
+          taskId: storedVehicle.taskId,
+          label: storedVehicle.label || I18n.t('vehicle.dream-car'),
+          imageUrl: task.imageUrl || storedVehicle.imageUrl,
+          prompt: storedVehicle.prompt,
+        });
+        setDreamStatus('dream-vehicle-status', I18n.t('dream.restored'), 'done');
+      } else if (task.status === 'failed' || task.status === 'cancelled') {
+        localStorage.removeItem(DREAM_VEHICLE_STORE);
+      }
+    } catch {
+      // Task expired upstream or server hiccup; keep the entry for later.
+    }
+  }
+  if (storedMap && Array.isArray(storedMap.props) && storedMap.props.length > 0) {
+    const strip = document.getElementById('dream-prop-strip');
+    if (storedMap.theme) document.getElementById('dream-map-input').value = storedMap.theme;
+    let restored = 0;
+    for (const { role, taskId } of storedMap.props) {
+      if (!TripoCore.PROP_ROLES.includes(role) || !TripoCore.isTaskId(taskId)) continue;
+      try {
+        const task = await fetchDreamJson(`/api/tripo/task/${taskId}`);
+        if (task.status !== 'success') continue;
+        const prop = {
+          role,
+          taskId,
+          status: 'success',
+          file: `${dreamApiBase}/api/tripo/model/${taskId}`,
+          imageUrl: task.imageUrl || '',
+        };
+        dreamProps.set(role, prop);
+        strip.hidden = false;
+        markDreamPropCard(createDreamPropCard(strip, role), prop);
+        if (game) game._placeDreamProp(prop);
+        restored += 1;
+      } catch {
+        // Skip entries the server can no longer resolve.
+      }
+    }
+    if (restored > 0) setDreamStatus('dream-map-status', I18n.t('dream.restored'), 'done');
+    else localStorage.removeItem(DREAM_MAP_STORE);
+  }
+}
+
+async function initDreamLab() {
+  const lab = document.getElementById('dream-lab');
+  if (!lab || typeof fetch !== 'function' || !TripoCore) return;
+  dreamApiBase = await resolveDreamApiBase();
+  if (!dreamApiBase) return; // no Tripo-enabled server reachable; stay hidden
+  lab.hidden = false;
+  document.getElementById('dream-vehicle-btn').addEventListener('click', generateDreamVehicle);
+  document.getElementById('dream-map-btn').addEventListener('click', generateDreamMap);
+  document.getElementById('dream-vehicle-input').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      generateDreamVehicle();
+    }
+  });
+  document.getElementById('dream-map-input').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      generateDreamMap();
+    }
+  });
+  restoreDreamLab();
+}
+
 class Game {
   constructor(canvas, props, runtime = null) {
     this.canvas = canvas;
@@ -1024,6 +1488,10 @@ class Game {
     this.scene.add(this.reticle);
     this._addLights();
     this._initVehicleBay();
+    this.dreamPropRoots = new Map();
+    for (const prop of dreamProps.values()) {
+      if (prop.status === 'success') this._placeDreamProp(prop);
+    }
 
     this._resizeHandler = () => this.resize();
     window.addEventListener('resize', this._resizeHandler);
@@ -1046,7 +1514,7 @@ class Game {
     this.localCar = car;
 
     const label = document.getElementById('vehicle-label');
-    if (label) label.textContent = I18n.t(`vehicle.${nextType}`);
+    if (label) label.textContent = vehicleDisplayName(nextType);
 
     if (!silent) {
       this.particles.burst(
@@ -1080,15 +1548,16 @@ class Game {
     const bay = document.getElementById('vehicle-bay');
     if (!bay) return;
     bay.innerHTML = '';
-    bay.style.setProperty('--bay-columns', String(Math.ceil(VEHICLE_TYPES.length / 3)));
+    const types = selectableVehicleTypes();
+    bay.style.setProperty('--bay-columns', String(Math.ceil(types.length / 3)));
     this.vehicleSlots = new Map();
     const thumbnailQueue = [];
-    for (const type of VEHICLE_TYPES) {
+    for (const type of types) {
       const slot = document.createElement('button');
       slot.type = 'button';
       slot.className = 'vehicle-slot';
       slot.setAttribute('role', 'option');
-      slot.setAttribute('aria-label', I18n.t(`vehicle.${type}`));
+      slot.setAttribute('aria-label', vehicleDisplayName(type));
       const thumb = document.createElement('img');
       thumb.className = 'vehicle-thumb';
       thumb.alt = '';
@@ -1129,6 +1598,44 @@ class Game {
       slot.classList.toggle('is-active', isActive);
       slot.classList.toggle('is-parked', Boolean(car) && !isActive);
       slot.setAttribute('aria-selected', String(isActive));
+    }
+  }
+
+  // Places one generated map prop at its fixed anchor spots. Runs during
+  // construction for already-generated props and again from the dream lab
+  // when a generation finishes while a race is running.
+  async _placeDreamProp(prop) {
+    const anchors = DREAM_PROP_ANCHORS[prop.role];
+    if (!anchors || !prop.file || this.dreamPropRoots.has(prop.role)) return;
+    const root = new THREE.Group();
+    this.dreamPropRoots.set(prop.role, root);
+    this.gameRoot.add(root);
+    try {
+      const source = await loadGLBModel(prop.file);
+      if (!root.parent) return; // game was destroyed while loading
+      for (const [x, z, yaw] of anchors.spots) {
+        const model = source.clone(true);
+        model.traverse((node) => {
+          if (!node.isMesh) return;
+          node.castShadow = true;
+          node.receiveShadow = true;
+        });
+        const box = new THREE.Box3().setFromObject(model);
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z) || 1;
+        const holder = new THREE.Group();
+        holder.scale.setScalar(anchors.size / maxDim);
+        model.position.set(-center.x, -box.min.y, -center.z);
+        holder.add(model);
+        holder.position.set(x, 0, z);
+        holder.rotation.y = yaw;
+        root.add(holder);
+      }
+    } catch (error) {
+      console.warn(`[dream] failed to place ${prop.role} prop`, error);
+      this.gameRoot.remove(root);
+      this.dreamPropRoots.delete(prop.role);
     }
   }
 
@@ -2326,6 +2833,7 @@ function restoreLobby(message) {
   hud.classList.remove('is-ready');
   hud.hidden = true;
   document.getElementById('lobby-status').textContent = message;
+  startDreamPreviewLoop();
 }
 
 async function runCountdown(activeGame) {
@@ -2529,6 +3037,7 @@ async function bootstrap() {
   );
 
   setupAudioControls();
+  initDreamLab();
   document.getElementById('room-input').addEventListener('blur', getRoom);
   document.getElementById('check-signal-btn').addEventListener('click', checkBackend);
   document.getElementById('reset-btn').addEventListener('click', () => {

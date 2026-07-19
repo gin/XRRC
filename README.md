@@ -19,6 +19,8 @@ private behind Tailscale Serve.
 
 - Responsive lobby and HUD with English, Spanish, and French localization.
 - Seven handling classes plus six on-demand GLB rally-car skins.
+- Optional Tripo-powered dream lab: prompt a custom AI-generated vehicle and
+  map-themed props while waiting for friends to join.
 - Spline-built asphalt circuit, shoulders, curbs, grid markings, scenery, and
   a separate jump-and-loop stunt lane.
 - Keyboard, touch, standard Gamepad/XInput, and Quest-style XR controls.
@@ -31,7 +33,7 @@ private behind Tailscale Serve.
 - Native immersive WebXR and an on-demand 8th Wall camera pipeline.
 - A Quest quality profile and instanced track props that keep the reference
   scene within the automated render budget.
-- 40 Node tests, 11 Playwright browser tests, CI, and deterministic screenshots.
+- 49 Node tests, 11 Playwright browser tests, CI, and deterministic screenshots.
 
 ## Visual gallery
 
@@ -113,6 +115,30 @@ The in-race bay renders a cached thumbnail for all 13 vehicles. Selecting an
 empty slot summons that vehicle at its fixed pit stall and transfers control;
 the previous vehicle remains parked where it stopped. Selecting a parked slot
 recalls and disposes that vehicle. Selecting the active slot is a no-op.
+
+### Dream lab (Tripo AI generation)
+
+When the server is started with a `TRIPO_API_KEY`, the lobby shows a **Dream
+lab** panel backed by the [Tripo](https://developers.tripo3d.ai) text-to-3D
+API. Generation runs in about the time it takes friends to join a room:
+
+- **Invent a vehicle** - a text prompt is composed into a guard-railed,
+  toy-scale Tripo task server-side. When it finishes, the car appears in the
+  lobby as its actual 3D model on a slowly spinning display plate, joins the
+  vehicle bay as a selectable entry (preselected), and rides the rally physics
+  profile like the bundled GLB skins. The skin's task ID travels with network
+  state, so peers on a Tripo-enabled server render the same generated model;
+  other peers see the procedural rally fallback.
+- **Theme the map** - a second prompt generates three matching props
+  (landmark, decor, marker). Each card in the panel shows Tripo's rendered
+  preview image as soon as its prop is ready, and the models are placed on
+  fixed grass and infield anchors when the race loads - or immediately, if a
+  generation finishes mid-race.
+
+Both results persist in `localStorage` and are restored on the next visit
+while the underlying Tripo tasks remain queryable. Without a key (or on a
+static host with no reachable Tripo-enabled relay), the panel stays hidden and
+nothing else changes.
 
 ### Controls
 
@@ -321,6 +347,7 @@ the public site.
 | `ALLOWED_ORIGINS` | `https://lab.liambroza.com` | `server.js` | Comma-separated browser origin allowlist |
 | `XRRC_SIGNAL_URL` | Empty | Pages workflow | Build-time default relay URL |
 | `XRRC_DEPLOYMENT.signalUrl` | Empty | Browser | Static runtime default relay URL |
+| `TRIPO_API_KEY` | Empty | `server.js` | Enables the Tripo dream lab proxy (`/api/tripo/*`) |
 
 ### URL parameters
 
@@ -380,12 +407,13 @@ vehicle types, road normals, and shadow state.
 | `public/js/controls-core.js` | Deadzones and device-independent control mappings |
 | `public/js/network.js` | WebSocket signaling client and WebRTC peer data channels |
 | `public/js/config.js` | Room, relay, health, and invite URL normalization |
+| `public/js/tripo-core.js` | Tripo prompt composition, task payloads, and task normalization |
 | `public/js/share-core.js` | Email, text, and WhatsApp invite target encoding |
 | `public/js/xr-core.js` | Native WebXR session and 8th Wall runtime contracts |
 | `public/js/audio.js` | Procedural music, engine, skid, cue, and impact audio |
 | `public/js/i18n.js` | English, Spanish, and French dictionaries and persistence |
 | `public/runtime-config.js` | Static-host deployment values |
-| `server.js` | Static local host, signaling relay, origin policy, and health endpoint |
+| `server.js` | Static local host, signaling relay, origin policy, health endpoint, and Tripo proxy |
 | `test/` | Node unit and integration tests |
 | `e2e/` | Playwright gameplay, mobile, XR, performance, and WebRTC tests |
 | `scripts/capture-screenshots.js` | Deterministic desktop, mobile, vehicle, and two-peer captures |
