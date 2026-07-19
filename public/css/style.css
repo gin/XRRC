@@ -1214,7 +1214,7 @@ label {
   grid-auto-rows: 2.5rem;
   grid-auto-flow: row;
   gap: 0.3rem;
-  max-height: min(44vh, 8.35rem);
+  max-height: min(50vh, 9rem);
   padding: 0.32rem;
   overflow-y: auto;
   background: rgb(36 37 31 / 72%);
