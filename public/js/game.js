@@ -96,6 +96,68 @@ function renderCarThumbnail(file, source) {
   return dataUrl;
 }
 
+// -- Box colliders -----------------------------------------------------
+// Cars are treated as 2D oriented boxes (their ground footprint) for
+// collision purposes; y is ignored since every car stays on the track floor.
+function clampToTrack(position) {
+  const limit = TRACK_SIZE / 2 - 0.12;
+  position.x = Math.max(-limit, Math.min(limit, position.x));
+  position.z = Math.max(-limit, Math.min(limit, position.z));
+}
+
+function carOBB(car) {
+  const p = car.group.position;
+  return {
+    x: p.x,
+    z: p.z,
+    theta: car.group.rotation.y,
+    hx: car.halfExtents.x,
+    hz: car.halfExtents.z,
+  };
+}
+
+// Separating-axis test for two rotated rectangles in the XZ plane. Returns
+// null when they don't overlap, otherwise the minimum-penetration normal
+// (pointing from a toward b) and the overlap distance along it.
+function testOBBCollision(a, b) {
+  const ua = [Math.cos(a.theta), Math.sin(a.theta)];
+  const va = [-Math.sin(a.theta), Math.cos(a.theta)];
+  const ub = [Math.cos(b.theta), Math.sin(b.theta)];
+  const vb = [-Math.sin(b.theta), Math.cos(b.theta)];
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+
+  let minOverlap = Infinity;
+  let normal = null;
+  for (const axis of [ua, va, ub, vb]) {
+    const dist = dx * axis[0] + dz * axis[1];
+    const rA = a.hx * Math.abs(ua[0] * axis[0] + ua[1] * axis[1]) +
+      a.hz * Math.abs(va[0] * axis[0] + va[1] * axis[1]);
+    const rB = b.hx * Math.abs(ub[0] * axis[0] + ub[1] * axis[1]) +
+      b.hz * Math.abs(vb[0] * axis[0] + vb[1] * axis[1]);
+    const overlap = rA + rB - Math.abs(dist);
+    if (overlap <= 0) return null;
+    if (overlap < minOverlap) {
+      minOverlap = overlap;
+      normal = dist < 0 ? [-axis[0], -axis[1]] : [axis[0], axis[1]];
+    }
+  }
+  return { normal: { x: normal[0], z: normal[1] }, overlap: minOverlap };
+}
+
+// Adds a knockback impulse to a car's collision velocity, capped so that
+// holding throttle into an obstacle can't make it grow without bound.
+function addBump(car, nx, nz, speed) {
+  car.bumpVelocity.x += nx * speed;
+  car.bumpVelocity.z += nz * speed;
+  const mag = Math.hypot(car.bumpVelocity.x, car.bumpVelocity.z);
+  const maxBump = 2.2;
+  if (mag > maxBump) {
+    car.bumpVelocity.x = (car.bumpVelocity.x / mag) * maxBump;
+    car.bumpVelocity.z = (car.bumpVelocity.z / mag) * maxBump;
+  }
+}
+
 class Car {
   constructor(file, color = 0xe63946) {
     this.group = new THREE.Group();
@@ -105,6 +167,8 @@ class Car {
     this.steering = 0;
     this.broadcastTimer = 0;
     this.wheels = [];
+    this.bumpVelocity = { x: 0, z: 0 };
+    this.halfExtents = null;
     this._load(file, color);
   }
 
@@ -124,11 +188,13 @@ class Car {
       const center = box.getCenter(new THREE.Vector3());
       model.position.set(-center.x, -box.min.y, -center.z);
 
+      const scale = size.z > 0 ? CAR_LENGTH / size.z : 1;
       const pivot = new THREE.Group();
       pivot.rotation.y = CAR_MODEL_YAW_OFFSET;
-      pivot.scale.setScalar(size.z > 0 ? CAR_LENGTH / size.z : 1);
+      pivot.scale.setScalar(scale);
       pivot.add(model);
       this.group.add(pivot);
+      this.halfExtents = { x: (size.x * scale) / 2, z: (size.z * scale) / 2 };
     } catch (err) {
       console.error(`[car] failed to load ${file}, using fallback geometry`, err);
       this._buildFallback(color);
@@ -164,6 +230,7 @@ class Car {
       this.group.add(wheel);
       this.wheels.push(wheel);
     }
+    this.halfExtents = { x: 0.14, z: 0.15 };
   }
 
   update(delta) {
@@ -184,9 +251,8 @@ class Car {
 
     this.group.position.x -= Math.sin(this.group.rotation.y) * this.velocity * dt;
     this.group.position.z -= Math.cos(this.group.rotation.y) * this.velocity * dt;
-    const limit = TRACK_SIZE / 2 - 0.12;
-    this.group.position.x = Math.max(-limit, Math.min(limit, this.group.position.x));
-    this.group.position.z = Math.max(-limit, Math.min(limit, this.group.position.z));
+    this.applyBump(dt);
+    clampToTrack(this.group.position);
 
     this.broadcastTimer += dt;
     if (this.broadcastTimer >= 0.05 && networkManager) {
@@ -199,6 +265,23 @@ class Car {
         v: this.velocity,
       });
     }
+  }
+
+  // Collision knockback: a residual world-space velocity decoupled from the
+  // driving model, so both the controlled car and any car it hits can be
+  // shoved off their line of travel and settle back down.
+  applyBump(dt) {
+    const b = this.bumpVelocity;
+    if (Math.abs(b.x) < 0.001 && Math.abs(b.z) < 0.001) {
+      b.x = 0;
+      b.z = 0;
+      return;
+    }
+    this.group.position.x += b.x * dt;
+    this.group.position.z += b.z * dt;
+    const damping = Math.max(0, 1 - 6 * dt);
+    b.x *= damping;
+    b.z *= damping;
   }
 
   applyRemoteState(state) {
@@ -320,6 +403,56 @@ class Game {
     car.update(delta);
   }
 
+  // Parked (uncontrolled) cars don't run full driving physics, but still
+  // need to react to any bump velocity left over from a collision so they
+  // visibly bounce away and settle back down.
+  _settleParkedCars(delta) {
+    const dt = Math.min(delta, 0.05);
+    for (const [file, car] of this.worldCars) {
+      if (file === this.controlledFile) continue;
+      car.applyBump(dt);
+      clampToTrack(car.group.position);
+    }
+    for (const car of remoteCars.values()) {
+      car.applyBump(dt);
+      clampToTrack(car.group.position);
+    }
+  }
+
+  // Box-collider response: when the controlled car's footprint overlaps
+  // another car's, separate them along the minimum-penetration axis and
+  // give each a knockback impulse - the controlled car bounces back the
+  // way it came, the car it hit bounces the opposite way.
+  _resolveCollisions() {
+    const car = this.controlledFile ? this.worldCars.get(this.controlledFile) : null;
+    if (!car || !car.halfExtents) return;
+
+    const others = [];
+    for (const [file, other] of this.worldCars) {
+      if (file !== this.controlledFile) others.push(other);
+    }
+    others.push(...remoteCars.values());
+
+    for (const other of others) {
+      if (!other.halfExtents) continue;
+      const hit = testOBBCollision(carOBB(car), carOBB(other));
+      if (!hit) continue;
+
+      const { normal, overlap } = hit;
+      car.group.position.x -= normal.x * overlap * 0.5;
+      car.group.position.z -= normal.z * overlap * 0.5;
+      other.group.position.x += normal.x * overlap * 0.5;
+      other.group.position.z += normal.z * overlap * 0.5;
+      clampToTrack(car.group.position);
+      clampToTrack(other.group.position);
+
+      const bounceSpeed = Math.min(1.6, Math.max(0.5, Math.abs(car.velocity) * 1.3));
+      addBump(car, -normal.x, -normal.z, bounceSpeed);
+      addBump(other, normal.x, normal.z, bounceSpeed * 0.8);
+      car.velocity *= -0.3;
+    }
+  }
+
   _addLights() {
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 2));
     const sun = new THREE.DirectionalLight(0xffffff, 2.5);
@@ -428,7 +561,10 @@ class Game {
   }
 
   render() {
-    this.updateControlledCar(this.clock.getDelta());
+    const delta = this.clock.getDelta();
+    this.updateControlledCar(delta);
+    this._settleParkedCars(delta);
+    this._resolveCollisions();
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -565,7 +701,11 @@ async function start8thWall() {
           document.getElementById('place-hint').classList.add('hidden');
         },
         onUpdate: () => {
-          if (game) game.updateControlledCar(game.clock.getDelta());
+          if (!game) return;
+          const delta = game.clock.getDelta();
+          game.updateControlledCar(delta);
+          game._settleParkedCars(delta);
+          game._resolveCollisions();
         },
       },
     ]);

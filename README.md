@@ -62,7 +62,7 @@ renders the same model for a given peer without any extra network protocol.
 
 ### Garage
 
-After entering the world, a dock at the bottom of the screen lists all seven car models as plates with
+After entering the world, a dock at the bottom of the screen lists all six car models as plates with
 rendered thumbnails (snapshotted once per model with an offscreen `THREE.WebGLRenderer`). Clicking an
 available plate spawns that car onto the track and hands it control; whatever car was previously controlled
 is left parked exactly where it stopped. Clicking a plate whose car is already on the track (shown dimmed
@@ -70,6 +70,19 @@ with a dashed border) removes that car from the world and returns it to the plat
 car, no car responds to input until another is summoned. `Game` tracks this with a `worldCars` map keyed by
 model file and a single `controlledFile`; only the controlled car receives `car-input` events and runs
 physics in `update()`, so parked cars stay inert without any extra bookkeeping.
+
+### Collisions
+
+Every `Car` carries a box collider: half-extents on the X/Z ground plane, sized from the model's actual
+`Box3` after the same load-time scale/center pass used for rendering (fallback box cars get fixed
+half-extents). Each frame the controlled car's oriented box is tested against every other car in
+`worldCars` and `remoteCars` via 2D SAT (`testOBBCollision`), which also works for cars that aren't yaw-
+aligned mid-turn. On overlap, `Game._resolveCollisions()` separates the pair along the minimum-penetration
+normal and gives each a `bumpVelocity` impulse decoupled from the driving model: the controlled car's
+impulse points back the way it came (plus a reversed, damped `velocity`), the car it hit is pushed the
+opposite way. `Car.applyBump()` integrates and damps that impulse every frame — for the controlled car as
+part of `update()`, for parked/remote cars via `Game._settleParkedCars()` — so both sides bounce briefly
+and settle without any per-car polling or ongoing physics state once the impulse decays to zero.
 
 ## 8th Wall licensing
 
