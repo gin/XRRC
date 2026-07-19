@@ -384,7 +384,7 @@ async function start8thWall() {
   }
 }
 
-window.addEventListener('DOMContentLoaded', async () => {
+async function bootstrap() {
   const room = new URLSearchParams(location.search).get('room');
   if (room) document.getElementById('room-input').value = room;
 
@@ -409,4 +409,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   });
   document.getElementById('desktop-btn').addEventListener('click', () => enterGame().startDesktop());
   document.getElementById('eighthwall-btn').addEventListener('click', start8thWall);
-});
+}
+
+if (document.readyState === 'loading') {
+  window.addEventListener('DOMContentLoaded', bootstrap, { once: true });
+} else {
+  bootstrap();
+}

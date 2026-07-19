@@ -93,6 +93,10 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`XRRC server running → http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  server.listen(PORT, () => {
+    console.log(`XRRC server running → http://localhost:${PORT}`);
+  });
+}
+
+module.exports = { server };
