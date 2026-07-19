@@ -229,7 +229,8 @@ class Game {
     this.renderer.setAnimationLoop((time, frame) => {
       if (frame && !this.gameRoot.visible) {
         const hits = frame.getHitTestResults(hitTestSource);
-        const pose = hits[0] && hits[0].getPose(this.renderer.xr.getReferenceSpace());
+        const hit = hits[0];
+        const pose = hit ? hit.getPose(this.renderer.xr.getReferenceSpace()) : null;
         this.reticle.visible = Boolean(pose);
         if (pose) this.reticle.matrix.fromArray(pose.transform.matrix);
       }
@@ -276,7 +277,6 @@ function startNetwork(room) {
     return;
   }
   networkManager = new window.NetworkManager();
-  window.networkManager = networkManager;
   networkManager.addEventListener('peer-join', ({ detail }) => {
     const car = new Car(detail.color, false);
     car.group.position.x = remoteCars.size * 0.3;
@@ -392,9 +392,9 @@ async function bootstrap() {
   if (room) document.getElementById('room-input').value = room;
 
   const webXRButton = document.getElementById('webxr-btn');
-  const supported = Boolean(
-    navigator.xr && await navigator.xr.isSessionSupported('immersive-ar').catch(() => false)
-  );
+  const supported = navigator.xr
+    ? await navigator.xr.isSessionSupported('immersive-ar').catch(() => false)
+    : false;
   webXRButton.disabled = !supported;
   webXRButton.textContent = supported ? 'Start WebXR (recommended)' : 'WebXR unavailable';
   document.getElementById('lobby-status').textContent = supported
