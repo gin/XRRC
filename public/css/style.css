@@ -1,0 +1,267 @@
+/* ============================================================
+   XRRC – WebAR RC Cars – UI Styles
+   ============================================================ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #000;
+}
+
+/* A-Frame canvas fills viewport */
+a-scene {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* ── Overlay ─────────────────────────────────────────────── */
+#overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* ── Lobby panel ─────────────────────────────────────────── */
+#lobby {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.1rem;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 2rem 1.5rem;
+  pointer-events: auto;
+}
+
+.logo {
+  font-size: 3.5rem;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  color: #e63946;
+  line-height: 1;
+}
+
+.tagline {
+  font-size: 1rem;
+  color: rgba(255, 255, 255, 0.6);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
+  max-width: 300px;
+}
+
+.field label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.field input {
+  padding: 0.6rem 0.9rem;
+  border-radius: 10px;
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 0.2s;
+  pointer-events: auto;
+}
+
+.field input:focus {
+  border-color: #e63946;
+}
+
+.primary-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 100%;
+  max-width: 300px;
+  padding: 0.85rem 1.5rem;
+  border: none;
+  border-radius: 14px;
+  background: #e63946;
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.primary-btn:active {
+  background: #c1121f;
+  transform: scale(0.97);
+}
+
+.status-text {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.5);
+  text-align: center;
+  min-height: 1.2em;
+}
+
+.link-group {
+  margin-top: -0.5rem;
+}
+
+.share-link {
+  font-size: 0.85rem;
+  color: #4cc9f0;
+  text-decoration: underline;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+/* ── HUD ─────────────────────────────────────────────────── */
+#hud {
+  position: absolute;
+  inset: 0;
+}
+
+/* Peer counter badge */
+#peer-badge {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  pointer-events: none;
+  font-size: 0.95rem;
+  color: #fff;
+  backdrop-filter: blur(8px);
+}
+
+#peer-icon {
+  font-size: 1rem;
+}
+
+#peer-count {
+  font-weight: 700;
+}
+
+/* Placement hint banner */
+.hint-banner {
+  position: absolute;
+  bottom: 200px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 0.85rem;
+  padding: 0.5rem 1.1rem;
+  border-radius: 999px;
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+  transition: opacity 0.4s;
+}
+
+.hint-banner.hidden {
+  opacity: 0;
+}
+
+/* ── Virtual joystick ────────────────────────────────────── */
+#joystick-zone {
+  position: absolute;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+#joystick {
+  position: relative;
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#joystick-knob {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(230, 57, 70, 0.85);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  transition: background 0.15s;
+  pointer-events: none;
+}
+
+/* ── Keyboard hint (desktop) ─────────────────────────────── */
+.key-hint {
+  position: absolute;
+  bottom: 1.2rem;
+  right: 1.2rem;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.4);
+  pointer-events: none;
+}
+
+/* ── Responsive tweaks ───────────────────────────────────── */
+@media (max-width: 400px) {
+  .logo {
+    font-size: 2.8rem;
+  }
+}
+
+@media (pointer: fine) {
+  /* Desktop: hide joystick, show keyboard hint */
+  #joystick-zone {
+    display: none;
+  }
+  .key-hint {
+    display: block;
+  }
+}
+
+@media (pointer: coarse) {
+  /* Mobile: hide keyboard hint */
+  .key-hint {
+    display: none;
+  }
+}
