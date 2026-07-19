@@ -153,7 +153,7 @@ class NetworkManager extends EventTarget {
 
     pc.onconnectionstatechange = () => {
       const s = pc.connectionState;
-      console.log(`[net] Peer ${peerId} state: ${s}`);
+      console.log('[net] Peer', peerId, 'state:', s);
       if (s === 'disconnected' || s === 'failed' || s === 'closed') {
         this._removePeer(peerId);
       }
@@ -213,7 +213,7 @@ class NetworkManager extends EventTarget {
 
   _setupDataChannel(dc, peerId) {
     dc.onopen = () => {
-      console.log(`[net] Data channel open ↔ ${peerId}`);
+      console.log('[net] Data channel open ↔', peerId);
       const record = this._peers.get(peerId) || {};
       this.dispatchEvent(
         new CustomEvent('peer-join', { detail: { id: peerId, color: record.color } })
@@ -231,11 +231,11 @@ class NetworkManager extends EventTarget {
     };
 
     dc.onclose = () => {
-      console.log(`[net] Data channel closed ↔ ${peerId}`);
+      console.log('[net] Data channel closed ↔', peerId);
     };
 
     dc.onerror = (err) => {
-      console.warn(`[net] Data channel error ↔ ${peerId}:`, err);
+      console.warn('[net] Data channel error ↔', peerId, err);
     };
   }
 

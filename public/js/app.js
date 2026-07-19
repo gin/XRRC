@@ -42,6 +42,11 @@ function updatePeerBadge(count) {
 
 const remoteCars = new Map(); // peerId -> a-entity
 
+/** Total connected players = remote peers + local player (always 1). */
+function totalPlayers() {
+  return remoteCars.size + 1;
+}
+
 function spawnRemoteCar(peerId, color) {
   if (remoteCars.has(peerId)) return;
 
@@ -49,12 +54,12 @@ function spawnRemoteCar(peerId, color) {
   const car = document.createElement('a-entity');
   car.setAttribute('id', `car-${peerId}`);
   // Offset spawn slightly so cars don't stack
-  const offset = (remoteCars.size + 1) * 0.3;
+  const offset = remoteCars.size * 0.3;
   car.setAttribute('position', `${offset} 0 0`);
   car.setAttribute('rc-car', `isLocal: false; color: ${color}`);
   gameRoot.appendChild(car);
   remoteCars.set(peerId, car);
-  updatePeerBadge(remoteCars.size + 1);
+  updatePeerBadge(totalPlayers());
 }
 
 function removeRemoteCar(peerId) {
@@ -63,7 +68,7 @@ function removeRemoteCar(peerId) {
     car.parentNode.removeChild(car);
     remoteCars.delete(peerId);
   }
-  updatePeerBadge(remoteCars.size + 1);
+  updatePeerBadge(totalPlayers());
 }
 
 function applyRemoteState(peerId, state) {
