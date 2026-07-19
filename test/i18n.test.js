@@ -15,11 +15,25 @@ test('translates interface and vehicle copy with interpolation', () => {
   I18n.setLanguage('es', false);
   assert.equal(I18n.t('mode.desktop'), 'Carrera de escritorio');
   assert.equal(I18n.t('vehicle.helicopter'), 'Helicoptero');
+  assert.equal(I18n.t('share.title'), 'Llama a tu equipo');
   assert.equal(
     I18n.t('controller.connected', { label: 'XInput' }),
     'XInput conectado'
   );
   I18n.setLanguage('en', false);
+});
+
+test('keeps every share-dialog string localized', () => {
+  const shareKeys = Object.keys(I18n.dictionaries.en).filter((key) => key.startsWith('share.'));
+  for (const language of I18n.supported) {
+    for (const key of shareKeys) {
+      assert.equal(
+        typeof I18n.dictionaries[language][key],
+        'string',
+        `${language} is missing ${key}`
+      );
+    }
+  }
 });
 
 test('falls back to English when a localized key is missing', () => {

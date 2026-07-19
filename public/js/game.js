@@ -1,16 +1,152 @@
 'use strict';
 
+import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.183.2/examples/jsm/loaders/GLTFLoader.js';
+
 const THREE = window.THREE;
 const Core = window.XRRCGameCore;
 const Config = window.XRRCConfig;
 const XRCore = window.XRRCXRCore;
 const ControlsCore = window.XRRCControlsCore;
 const I18n = window.XRRCI18n;
+const ShareCore = window.XRRCShareCore;
 const TRACK_BOUNDS = Object.freeze({ x: 4.15, z: 3.15 });
 const START_GRID = Object.freeze({ x: 0.8, z: 2.25, heading: Math.PI / 2 });
 const RAMP_ZONE = Object.freeze({ x: -1.45, z: 0.08 });
 const ROAD_WIDTH = 1.18;
+const QR_CODE_SOURCE = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm';
 const remoteCars = new Map();
+
+// GLB car skins: visual reskins of the 'rally' physics profile, loaded on
+// demand from public/assets/cars/. Each glb was authored nose-forward on
+// +Z, but the game's forward direction at yaw 0 is -Z, so loaded models
+// get a 180deg yaw correction (confirmed against wheel-node placement and
+// isometric renders for every model in the set).
+const GLB_SKINS = Object.freeze({
+  'toy-car-1': { file: 'assets/cars/toy-car-1.glb' },
+  'toy-car-2': { file: 'assets/cars/toy-car-2.glb' },
+  'toy-car-3': { file: 'assets/cars/toy-car-3.glb' },
+  'toy-car-taxi': { file: 'assets/cars/toy-car-taxi.glb' },
+  'toy-car-cop': { file: 'assets/cars/toy-car-cop.glb' },
+  car1: { file: 'assets/cars/car1.glb' },
+});
+const GLB_SKIN_YAW_OFFSET = Math.PI;
+const GLB_SKIN_LENGTH = 0.42; // matches the rally car's chassis depth (Z)
+const gltfLoader = new GLTFLoader();
+const glbModelCache = new Map(); // file -> Promise<THREE.Object3D>
+
+function loadGLBModel(file) {
+  if (!glbModelCache.has(file)) {
+    glbModelCache.set(
+      file,
+      new Promise((resolve, reject) => {
+        gltfLoader.load(file, (gltf) => resolve(gltf.scene), undefined, reject);
+      })
+    );
+  }
+  return glbModelCache.get(file);
+}
+
+// Vehicle-bay selection can name a physics type (rally, buggy, ...) or a
+// GLB skin id; GLB skins pass through untouched so Vehicle can load them,
+// everything else is sanitized by the physics layer's normalizer.
+function normalizeVehicleSelection(value) {
+  return Object.hasOwn(GLB_SKINS, value) ? value : Core.normalizeVehicleType(value);
+}
+
+// Canonical selection order: the 7 procedural physics types, then the 6
+// GLB skins - matches the lobby's vehicle bay markup and drives the
+// in-race vehicle bay's slot order and each vehicle's fixed pit position.
+const VEHICLE_TYPES = Object.freeze([...Object.keys(Core.VEHICLE_SPECS), ...Object.keys(GLB_SKINS)]);
+
+// Every selectable vehicle gets a fixed home spot near the start grid so
+// summoning/recalling never has to reason about what else is parked.
+function pitStallPosition(type) {
+  const index = VEHICLE_TYPES.indexOf(type);
+  const cols = VEHICLE_TYPES.length;
+  return {
+    x: START_GRID.x + (index - (cols - 1) / 2) * 0.36,
+    z: START_GRID.z + 0.55,
+    heading: START_GRID.heading,
+  };
+}
+
+// -- Box colliders -------------------------------------------------------
+// Every vehicle gets its footprint measured directly from its built
+// geometry (procedural body or loaded glb) rather than hand-tuned
+// per-type constants, so collider size always matches what's rendered.
+// Measured with the group's transform temporarily zeroed so a vehicle's
+// current heading/position never skews the result.
+function measureHalfExtents(group) {
+  const heading = group.rotation.y;
+  const position = group.position.clone();
+  group.rotation.y = 0;
+  group.position.set(0, 0, 0);
+  group.updateWorldMatrix(true, true);
+  const box = new THREE.Box3().setFromObject(group);
+  group.rotation.y = heading;
+  group.position.copy(position);
+  group.updateWorldMatrix(true, true);
+  const size = box.getSize(new THREE.Vector3());
+  return { x: Math.max(size.x / 2, 0.05), z: Math.max(size.z / 2, 0.05) };
+}
+
+function clampToBounds(position, bounds = TRACK_BOUNDS) {
+  position.x = Core.clamp(position.x, -bounds.x, bounds.x);
+  position.z = Core.clamp(position.z, -bounds.z, bounds.z);
+}
+
+function vehicleOBB(car) {
+  const p = car.group.position;
+  return {
+    x: p.x,
+    z: p.z,
+    theta: car.group.rotation.y,
+    hx: car.halfExtents.x,
+    hz: car.halfExtents.z,
+  };
+}
+
+// Separating-axis test for two rotated rectangles in the XZ plane. Returns
+// null when they don't overlap, otherwise the minimum-penetration normal
+// (pointing from a toward b) and the overlap distance along it.
+function testOBBCollision(a, b) {
+  const ua = [Math.cos(a.theta), Math.sin(a.theta)];
+  const va = [-Math.sin(a.theta), Math.cos(a.theta)];
+  const ub = [Math.cos(b.theta), Math.sin(b.theta)];
+  const vb = [-Math.sin(b.theta), Math.cos(b.theta)];
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+
+  let minOverlap = Infinity;
+  let normal = null;
+  for (const axis of [ua, va, ub, vb]) {
+    const dist = dx * axis[0] + dz * axis[1];
+    const rA = a.hx * Math.abs(ua[0] * axis[0] + ua[1] * axis[1]) +
+      a.hz * Math.abs(va[0] * axis[0] + va[1] * axis[1]);
+    const rB = b.hx * Math.abs(ub[0] * axis[0] + ub[1] * axis[1]) +
+      b.hz * Math.abs(vb[0] * axis[0] + vb[1] * axis[1]);
+    const overlap = rA + rB - Math.abs(dist);
+    if (overlap <= 0) return null;
+    if (overlap < minOverlap) {
+      minOverlap = overlap;
+      normal = dist < 0 ? [-axis[0], -axis[1]] : [axis[0], axis[1]];
+    }
+  }
+  return { normal: { x: normal[0], z: normal[1] }, overlap: minOverlap };
+}
+
+// Adds a knockback impulse decoupled from the driving physics, capped so
+// holding throttle into an obstacle can't make it grow without bound.
+function addKnockback(car, nx, nz, speed) {
+  car.knockback.x += nx * speed;
+  car.knockback.z += nz * speed;
+  const mag = Math.hypot(car.knockback.x, car.knockback.z);
+  const maxKnockback = 2.2;
+  if (mag > maxKnockback) {
+    car.knockback.x = (car.knockback.x / mag) * maxKnockback;
+    car.knockback.z = (car.knockback.z / mag) * maxKnockback;
+  }
+}
 
 function prefersQuestQuality() {
   const requestedQuality = new URLSearchParams(window.location.search).get('quality');
@@ -23,6 +159,9 @@ function prefersQuestQuality() {
 let game = null;
 let networkManager = null;
 let toastTimer = null;
+let shareCopyTimer = null;
+let shareQrRequest = 0;
+let qrCodeModulePromise = null;
 let webXRSupportChecked = false;
 let webXRSupported = false;
 const audioManager = new window.XRRCAudioManager();
@@ -169,6 +308,8 @@ class Vehicle {
     this.remoteTarget = null;
     this.remoteReceivedAt = 0;
     this._bodyTilt = 0;
+    this.knockback = { x: 0, z: 0 };
+    this.modelReady = Promise.resolve();
     this.setType(type);
     this.reset(
       isLocal ? START_GRID.x : START_GRID.x + 0.42,
@@ -262,10 +403,7 @@ class Vehicle {
     tip.castShadow = false;
   }
 
-  setType(type) {
-    const nextType = Core.normalizeVehicleType(type);
-    if (this.type === nextType && this.visual.children.length > 0) return;
-
+  _clearVisual() {
     this.visual.traverse((object) => {
       if (object.geometry) object.geometry.dispose();
       if (object.material) {
@@ -279,9 +417,26 @@ class Vehicle {
     this.wheels = [];
     this.frontWheelPivots = [];
     this.rotors = [];
+  }
+
+  setType(type) {
+    const nextType = normalizeVehicleSelection(type);
+    if (this.type === nextType && this.visual.children.length > 0) return;
+
+    this._clearVisual();
     this.type = nextType;
     this.spec = Core.getVehicleSpec(nextType);
     this.group.position.y = this.spec.rideHeight;
+
+    const skin = GLB_SKINS[nextType];
+    if (skin) {
+      // Procedural placeholder so the car is visible immediately; swapped
+      // for the real model once the glb finishes loading.
+      this._buildRally();
+      this.halfExtents = measureHalfExtents(this.group);
+      this.modelReady = this._loadGLBSkin(nextType, skin);
+      return;
+    }
 
     const builders = {
       rally: () => this._buildRally(),
@@ -293,6 +448,40 @@ class Vehicle {
       helicopter: () => this._buildHelicopter(),
     };
     builders[nextType]();
+    this.halfExtents = measureHalfExtents(this.group);
+    this.modelReady = Promise.resolve();
+  }
+
+  async _loadGLBSkin(type, skin) {
+    try {
+      const source = await loadGLBModel(skin.file);
+      if (this.type !== type) return; // superseded by another setType() call
+
+      const model = source.clone(true);
+      model.traverse((node) => {
+        if (!node.isMesh) return;
+        node.castShadow = true;
+        node.receiveShadow = true;
+        if (/wheel/i.test(node.name)) this.wheels.push(node);
+      });
+
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      model.position.set(-center.x, -box.min.y, -center.z);
+
+      const scale = size.z > 0 ? GLB_SKIN_LENGTH / size.z : 1;
+      const pivot = new THREE.Group();
+      pivot.rotation.y = GLB_SKIN_YAW_OFFSET;
+      pivot.scale.setScalar(scale);
+      pivot.add(model);
+
+      this._clearVisual();
+      this.visual.add(pivot);
+      this.halfExtents = measureHalfExtents(this.group);
+    } catch (err) {
+      console.error(`[vehicle] failed to load ${skin.file}, keeping fallback body`, err);
+    }
   }
 
   _palette() {
@@ -543,6 +732,23 @@ class Vehicle {
     this.remoteTarget = null;
   }
 
+  // Collision knockback: a residual world-space velocity decoupled from
+  // the driving model, so both the controlled vehicle and whatever it
+  // hits can be shoved off their line of travel and settle back down.
+  applyKnockback(delta) {
+    const k = this.knockback;
+    if (Math.abs(k.x) < 0.001 && Math.abs(k.z) < 0.001) {
+      k.x = 0;
+      k.z = 0;
+      return;
+    }
+    this.group.position.x += k.x * delta;
+    this.group.position.z += k.z * delta;
+    const damping = Math.max(0, 1 - 6 * delta);
+    k.x *= damping;
+    k.z *= damping;
+  }
+
   setActive(active) {
     this.active = active;
     if (!active) {
@@ -573,13 +779,15 @@ class Vehicle {
     this.group.position.x = next.x;
     this.group.position.z = next.z;
     this.group.rotation.y = next.heading;
+    this.applyKnockback(delta);
+    clampToBounds(this.group.position);
     this._applyVisualMotion(delta, next.speedRatio);
     for (const pivot of this.frontWheelPivots) {
       pivot.rotation.y += ((this.steering * 0.42) - pivot.rotation.y) * 0.2;
     }
 
     this.broadcastTimer += delta;
-    if (this.broadcastTimer >= 0.05 && networkManager) {
+    if (this.active && this.broadcastTimer >= 0.05 && networkManager) {
       this.broadcastTimer = 0;
       networkManager.broadcastState({
         type: this.type,
@@ -664,6 +872,8 @@ class Vehicle {
     while (rotationDelta > Math.PI) rotationDelta -= Math.PI * 2;
     while (rotationDelta < -Math.PI) rotationDelta += Math.PI * 2;
     this.group.rotation.y += rotationDelta * blend;
+    this.applyKnockback(delta);
+    clampToBounds(this.group.position);
     this.velocity += (target.v - this.velocity) * blend;
     this.throttle = target.throttle;
     this.steering = target.steering;
@@ -673,6 +883,90 @@ class Vehicle {
     );
     return null;
   }
+
+  dispose() {
+    this._clearVisual();
+    if (this.group.parent) this.group.parent.remove(this.group);
+  }
+}
+
+// Offscreen rig reused to snapshot every vehicle for the in-race bay: a
+// small dedicated renderer/scene/camera, framed to each vehicle's own
+// bounding box so procedural bodies and very different-sized GLB skins
+// all fill the thumbnail consistently.
+let thumbnailRenderer = null;
+let thumbnailCanvas = null;
+let thumbnailScene = null;
+let thumbnailCamera = null;
+const thumbnailCache = new Map(); // type -> Promise<string data URL>
+
+function scheduleBackgroundTask(callback) {
+  if (typeof window.requestIdleCallback === 'function') {
+    return {
+      id: window.requestIdleCallback(callback, { timeout: 750 }),
+      type: 'idle',
+    };
+  }
+  return {
+    id: window.setTimeout(callback, 32),
+    type: 'timeout',
+  };
+}
+
+function cancelBackgroundTask(task) {
+  if (!task) return;
+  if (task.type === 'idle') window.cancelIdleCallback(task.id);
+  else window.clearTimeout(task.id);
+}
+
+function ensureThumbnailRig() {
+  if (thumbnailRenderer) return;
+  const size = 128;
+  thumbnailCanvas = document.createElement('canvas');
+  thumbnailCanvas.width = size;
+  thumbnailCanvas.height = size;
+  thumbnailRenderer = new THREE.WebGLRenderer({ canvas: thumbnailCanvas, antialias: true, alpha: true });
+  thumbnailRenderer.setSize(size, size);
+  thumbnailRenderer.setClearColor(0x000000, 0);
+  thumbnailScene = new THREE.Scene();
+  thumbnailScene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 3));
+  const sun = new THREE.DirectionalLight(0xffffff, 2.4);
+  sun.position.set(2, 4, 3);
+  thumbnailScene.add(sun);
+  thumbnailCamera = new THREE.PerspectiveCamera(35, 1, 0.01, 50);
+}
+
+function renderVehicleThumbnail(type) {
+  if (thumbnailCache.has(type)) return thumbnailCache.get(type);
+  const promise = (async () => {
+    ensureThumbnailRig();
+    const car = new Vehicle(0xe84a27, false, type);
+    await car.modelReady;
+    car.group.position.set(0, 0, 0);
+    car.group.rotation.set(0, -0.6, 0);
+    car.group.updateWorldMatrix(true, true);
+    thumbnailScene.add(car.group);
+
+    const box = new THREE.Box3().setFromObject(car.group);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    thumbnailCamera.position.set(
+      center.x + maxDim * 1.35,
+      center.y + maxDim * 1.05,
+      center.z + maxDim * 1.35
+    );
+    thumbnailCamera.lookAt(center);
+    thumbnailCamera.updateProjectionMatrix();
+
+    thumbnailRenderer.render(thumbnailScene, thumbnailCamera);
+    const dataUrl = thumbnailCanvas.toDataURL('image/png');
+    thumbnailScene.remove(car.group);
+    car.dispose();
+    return dataUrl;
+  })();
+  thumbnailCache.set(type, promise);
+  return promise;
 }
 
 class Game {
@@ -702,6 +996,8 @@ class Game {
     this.dustTimer = 0;
     this.smokeTimer = 0;
     this.telemetryTimer = 0;
+    this.thumbnailGeneration = 0;
+    this.thumbnailTask = null;
     this.cameraTarget = new THREE.Vector3();
     this.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -721,15 +1017,119 @@ class Game {
     if (runtime) this.gameRoot.scale.setScalar(0.48);
     this.scene.add(this.gameRoot);
     this._buildTrack();
-    this.localCar = new Vehicle(0xe84a27, true, props.vehicle);
-    this.gameRoot.add(this.localCar.group);
+    this.worldCars = new Map(); // vehicle type/skin -> Vehicle placed on the track
     this.particles = new ParticleField(this.gameRoot, this.isQuest ? 96 : 180);
+    this.localCar = this._summonVehicle(props.vehicle, { silent: true });
     this.reticle = this._createReticle();
     this.scene.add(this.reticle);
     this._addLights();
+    this._initVehicleBay();
 
     this._resizeHandler = () => this.resize();
     window.addEventListener('resize', this._resizeHandler);
+  }
+
+  // Places a vehicle on the track and gives it control. Any previously
+  // controlled vehicle is left parked exactly where it stopped.
+  _summonVehicle(type, { silent = false } = {}) {
+    const nextType = normalizeVehicleSelection(type);
+    if (this.worldCars.has(nextType)) return this.worldCars.get(nextType);
+
+    if (this.localCar) this.localCar.setActive(false);
+
+    const car = new Vehicle(0xe84a27, true, nextType);
+    const spot = pitStallPosition(nextType);
+    car.reset(spot.x, spot.z, spot.heading);
+    car.setActive(true);
+    this.gameRoot.add(car.group);
+    this.worldCars.set(nextType, car);
+    this.localCar = car;
+
+    const label = document.getElementById('vehicle-label');
+    if (label) label.textContent = I18n.t(`vehicle.${nextType}`);
+
+    if (!silent) {
+      this.particles.burst(
+        car.group.position.clone().add(new THREE.Vector3(0, 0.1, 0)),
+        [0xf1c644, 0xe84a27, 0xf4ead2],
+        14,
+        0.4
+      );
+      audioManager.playCue('toggle');
+    }
+    this._syncVehicleBay();
+    return car;
+  }
+
+  // Removes a parked (non-controlled) vehicle from the track, freeing its
+  // vehicle-bay slot. The currently controlled vehicle can't recall itself.
+  _recallVehicle(type) {
+    const car = this.worldCars.get(type);
+    if (!car || car === this.localCar) return;
+    car.dispose();
+    this.worldCars.delete(type);
+    this._syncVehicleBay();
+  }
+
+  _onVehicleSlotClick(type) {
+    if (this.worldCars.has(type)) this._recallVehicle(type);
+    else this._summonVehicle(type);
+  }
+
+  _initVehicleBay() {
+    const bay = document.getElementById('vehicle-bay');
+    if (!bay) return;
+    bay.innerHTML = '';
+    bay.style.setProperty('--bay-columns', String(Math.ceil(VEHICLE_TYPES.length / 3)));
+    this.vehicleSlots = new Map();
+    const thumbnailQueue = [];
+    for (const type of VEHICLE_TYPES) {
+      const slot = document.createElement('button');
+      slot.type = 'button';
+      slot.className = 'vehicle-slot';
+      slot.setAttribute('role', 'option');
+      slot.setAttribute('aria-label', I18n.t(`vehicle.${type}`));
+      const thumb = document.createElement('img');
+      thumb.className = 'vehicle-thumb';
+      thumb.alt = '';
+      slot.append(thumb);
+      slot.addEventListener('click', () => this._onVehicleSlotClick(type));
+      bay.appendChild(slot);
+      this.vehicleSlots.set(type, slot);
+      thumbnailQueue.push({ thumb, type });
+    }
+    this._queueVehicleThumbnails(thumbnailQueue);
+    this._syncVehicleBay();
+  }
+
+  _queueVehicleThumbnails(queue) {
+    const generation = ++this.thumbnailGeneration;
+    const renderNext = () => {
+      if (generation !== this.thumbnailGeneration || queue.length === 0) return;
+      this.thumbnailTask = scheduleBackgroundTask(async () => {
+        this.thumbnailTask = null;
+        const { thumb, type } = queue.shift();
+        try {
+          const url = await renderVehicleThumbnail(type);
+          if (generation === this.thumbnailGeneration && thumb.isConnected) thumb.src = url;
+        } catch (error) {
+          console.warn(`[vehicle] failed to render ${type} thumbnail`, error);
+        }
+        renderNext();
+      });
+    };
+    renderNext();
+  }
+
+  _syncVehicleBay() {
+    if (!this.vehicleSlots) return;
+    for (const [type, slot] of this.vehicleSlots) {
+      const car = this.worldCars.get(type);
+      const isActive = car === this.localCar;
+      slot.classList.toggle('is-active', isActive);
+      slot.classList.toggle('is-parked', Boolean(car) && !isActive);
+      slot.setAttribute('aria-selected', String(isActive));
+    }
   }
 
   _standardMaterial(color, roughness = 0.72, metalness = 0.08) {
@@ -1389,8 +1789,13 @@ class Game {
 
   update() {
     const delta = Math.min(this.clock.getDelta(), 0.05);
-    const telemetry = this.localCar.update(delta);
+    let telemetry = null;
+    for (const car of this.worldCars.values()) {
+      const result = car.update(delta);
+      if (car === this.localCar) telemetry = result;
+    }
     for (const car of remoteCars.values()) car.update(delta);
+    this._resolveVehicleCollisions();
     this.particles.update(delta);
     this.collisionCooldown = Math.max(0, this.collisionCooldown - delta);
     if (!telemetry) return;
@@ -1485,22 +1890,8 @@ class Game {
       );
     }
 
-    if (telemetry.collided && telemetry.impact > 0.24 && this.collisionCooldown === 0) {
-      this.collisionCooldown = 0.28;
-      this.particles.burst(
-        this.localCar.group.position.clone().add(new THREE.Vector3(0, 0.08, 0)),
-        [0xf1c644, 0xe84a27, 0xf4ead2],
-        18,
-        Math.min(0.8, telemetry.impact)
-      );
-      audioManager.playCue('impact');
-      if (navigator.vibrate) navigator.vibrate(28);
-      document.dispatchEvent(new CustomEvent('car-impact', {
-        detail: {
-          strength: Math.min(1, Math.max(0.2, telemetry.impact)),
-          duration: 85,
-        },
-      }));
+    if (telemetry.collided && telemetry.impact > 0.24) {
+      this._triggerImpactFx(this.localCar.group.position, telemetry.impact);
     }
 
     if (this.props.jump && isGroundVehicle) {
@@ -1513,6 +1904,62 @@ class Game {
         : 0;
       this.localCar.jumpLift = Math.max(this.localCar.jumpLift, lift);
     }
+  }
+
+  // Box-collider response: when the controlled vehicle's footprint
+  // overlaps another vehicle's (parked locally, or a networked peer),
+  // separate them along the minimum-penetration axis and give each a
+  // knockback impulse - the controlled vehicle bounces back the way it
+  // came, the vehicle it hit bounces the opposite way.
+  _resolveVehicleCollisions() {
+    const car = this.localCar;
+    if (!car || !car.halfExtents) return;
+
+    const others = [];
+    for (const [type, other] of this.worldCars) {
+      if (type !== car.type) others.push(other);
+    }
+    others.push(...remoteCars.values());
+
+    for (const other of others) {
+      if (!other.halfExtents) continue;
+      const hit = testOBBCollision(vehicleOBB(car), vehicleOBB(other));
+      if (!hit) continue;
+
+      const { normal, overlap } = hit;
+      car.group.position.x -= normal.x * overlap * 0.5;
+      car.group.position.z -= normal.z * overlap * 0.5;
+      other.group.position.x += normal.x * overlap * 0.5;
+      other.group.position.z += normal.z * overlap * 0.5;
+      clampToBounds(car.group.position);
+      clampToBounds(other.group.position);
+
+      const bounceSpeed = Core.clamp(Math.abs(car.velocity) * 1.3, 0.5, 1.6);
+      addKnockback(car, -normal.x, -normal.z, bounceSpeed);
+      addKnockback(other, normal.x, normal.z, bounceSpeed * 0.8);
+      car.velocity *= -0.3;
+
+      this._triggerImpactFx(car.group.position, bounceSpeed * 0.6);
+    }
+  }
+
+  _triggerImpactFx(position, impact) {
+    if (this.collisionCooldown > 0) return;
+    this.collisionCooldown = 0.28;
+    this.particles.burst(
+      position.clone().add(new THREE.Vector3(0, 0.08, 0)),
+      [0xf1c644, 0xe84a27, 0xf4ead2],
+      18,
+      Math.min(0.8, impact)
+    );
+    audioManager.playCue('impact');
+    if (navigator.vibrate) navigator.vibrate(28);
+    document.dispatchEvent(new CustomEvent('car-impact', {
+      detail: {
+        strength: Math.min(1, Math.max(0.2, impact)),
+        duration: 85,
+      },
+    }));
   }
 
   render() {
@@ -1529,6 +1976,9 @@ class Game {
   }
 
   destroy() {
+    this.thumbnailGeneration += 1;
+    cancelBackgroundTask(this.thumbnailTask);
+    this.thumbnailTask = null;
     window.removeEventListener('resize', this._resizeHandler);
     if (this._placementHandler) {
       this.canvas.removeEventListener('click', this._placementHandler);
@@ -1554,7 +2004,7 @@ function getSignalValue() {
 
 function getVehicleType() {
   const selected = document.querySelector('input[name="vehicle"]:checked');
-  return Core.normalizeVehicleType(selected ? selected.value : 'rally');
+  return normalizeVehicleSelection(selected ? selected.value : 'rally');
 }
 
 function setSignalStatus(state, message, summary) {
@@ -1669,26 +2119,122 @@ function copyText(value) {
   return copied ? Promise.resolve() : Promise.reject(new Error('Copy failed'));
 }
 
+function loadQrCodeModule() {
+  if (!qrCodeModulePromise) {
+    qrCodeModulePromise = import(QR_CODE_SOURCE)
+      .then((module) => {
+        const qrCode = module.default || module;
+        if (typeof qrCode.toCanvas !== 'function') {
+          throw new TypeError('The QR code renderer is unavailable.');
+        }
+        return qrCode;
+      })
+      .catch((error) => {
+        qrCodeModulePromise = null;
+        throw error;
+      });
+  }
+  return qrCodeModulePromise;
+}
+
+function resetShareCopyButton() {
+  window.clearTimeout(shareCopyTimer);
+  shareCopyTimer = null;
+  const button = document.getElementById('share-copy');
+  button.dataset.state = 'idle';
+  button.textContent = I18n.t('share.copy');
+}
+
+async function renderShareQrCode(shareUrl) {
+  const request = ++shareQrRequest;
+  const card = document.getElementById('share-qr-card');
+  const canvas = document.getElementById('share-qr');
+  const status = document.getElementById('share-qr-status');
+  card.dataset.state = 'loading';
+  canvas.setAttribute('aria-busy', 'true');
+  status.textContent = I18n.t('share.qrLoading');
+
+  try {
+    const qrCode = await loadQrCodeModule();
+    await qrCode.toCanvas(canvas, shareUrl, {
+      color: {
+        dark: '#24251fff',
+        light: '#f4ead2ff',
+      },
+      errorCorrectionLevel: 'M',
+      margin: 2,
+      width: 240,
+    });
+    if (request !== shareQrRequest) return;
+    canvas.dataset.shareUrl = shareUrl;
+    canvas.setAttribute('aria-busy', 'false');
+    card.dataset.state = 'ready';
+    status.textContent = I18n.t('share.qrReady');
+  } catch (error) {
+    if (request !== shareQrRequest) return;
+    canvas.setAttribute('aria-busy', 'false');
+    card.dataset.state = 'error';
+    status.textContent = I18n.t('share.qrError');
+    console.error('[share] QR code generation failed:', error);
+  }
+}
+
 function setupShareLink(room, signalValue) {
   const button = document.getElementById('share-link');
+  const dialog = document.getElementById('share-dialog');
+  const closeButton = document.getElementById('share-close');
+  const copyButton = document.getElementById('share-copy');
+  const nativeButton = document.getElementById('share-native');
+  const shareInput = document.getElementById('share-url');
   const shareUrl = Config.buildShareUrl(location.href, room, signalValue);
-  button.hidden = false;
-  button.onclick = async () => {
+  const shareData = {
+    title: I18n.t('race.roomTitle', { room }),
+    text: I18n.t('race.roomInvite'),
+    url: shareUrl,
+  };
+  const targets = ShareCore.buildShareTargets(shareData);
+
+  shareInput.value = shareUrl;
+  shareInput.onfocus = () => shareInput.select();
+  document.getElementById('share-room-code').textContent = `#${room.toUpperCase()}`;
+  document.getElementById('share-email').href = targets.email;
+  document.getElementById('share-sms').href = targets.sms;
+  document.getElementById('share-whatsapp').href = targets.whatsapp;
+
+  nativeButton.hidden = typeof navigator.share !== 'function';
+  nativeButton.onclick = async () => {
     try {
-      if (navigator.share && matchMedia('(pointer: coarse)').matches) {
-        await navigator.share({
-          title: I18n.t('race.roomTitle', { room }),
-          text: I18n.t('race.roomInvite'),
-          url: shareUrl,
-        });
-      } else {
-        await copyText(shareUrl);
-        audioManager.playCue('copy');
-        showToast(I18n.t('race.copied'));
-      }
+      await navigator.share(shareData);
     } catch (error) {
       if (error.name !== 'AbortError') showToast(I18n.t('race.shareFailed'));
     }
+  };
+
+  copyButton.onclick = async () => {
+    try {
+      await copyText(shareUrl);
+      copyButton.dataset.state = 'success';
+      copyButton.textContent = I18n.t('share.copied');
+      audioManager.playCue('copy');
+      showToast(I18n.t('race.copied'));
+      window.clearTimeout(shareCopyTimer);
+      shareCopyTimer = window.setTimeout(resetShareCopyButton, 1800);
+    } catch {
+      showToast(I18n.t('race.shareFailed'));
+    }
+  };
+
+  closeButton.onclick = () => dialog.close();
+  dialog.onclick = (event) => {
+    if (event.target === dialog) dialog.close();
+  };
+
+  button.hidden = false;
+  button.onclick = () => {
+    resetShareCopyButton();
+    if (!dialog.open) dialog.showModal();
+    const qrCanvas = document.getElementById('share-qr');
+    if (qrCanvas.dataset.shareUrl !== shareUrl) renderShareQrCode(shareUrl);
   };
 }
 
@@ -1754,15 +2300,15 @@ function enterGame(runtime = null) {
       };
     },
   });
-  document.getElementById('vehicle-label').textContent = I18n.t(
-    `vehicle.${game.localCar.type}`
-  );
   startNetwork(room, signalValue);
   setupShareLink(room, signalValue);
   return game;
 }
 
 function restoreLobby(message) {
+  const shareDialog = document.getElementById('share-dialog');
+  if (shareDialog.open) shareDialog.close();
+  shareQrRequest += 1;
   if (networkManager) networkManager.disconnect();
   networkManager = null;
   for (const car of remoteCars.values()) {
@@ -1965,7 +2511,7 @@ async function bootstrap() {
   }
   const room = params.get('room');
   if (room) document.getElementById('room-input').value = Config.normalizeRoom(room);
-  const requestedVehicle = Core.normalizeVehicleType(params.get('vehicle'));
+  const requestedVehicle = normalizeVehicleSelection(params.get('vehicle'));
   const vehicleInput = document.querySelector(
     `input[name="vehicle"][value="${requestedVehicle}"]`
   );
@@ -2015,7 +2561,9 @@ async function bootstrap() {
       document.getElementById('signal-input').focus();
     }
   });
-  document.getElementById('eighthwall-btn').addEventListener('click', start8thWall);
+  const eighthWallButton = document.getElementById('eighthwall-btn');
+  eighthWallButton.addEventListener('click', start8thWall);
+  eighthWallButton.disabled = false;
 
   if (getSignalValue()) {
     document.getElementById('signal-panel').open = true;

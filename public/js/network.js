@@ -218,7 +218,7 @@
 
     _setupDataChannel(dc, peerId) {
       dc.bufferedAmountLowThreshold = 16 * 1024;
-      dc.onopen = () => {
+      const announcePeer = () => {
         const record = this._peers.get(peerId);
         if (!record || record.announced) return;
         record.announced = true;
@@ -226,6 +226,7 @@
           detail: { id: peerId, color: record.color },
         }));
       };
+      dc.onopen = announcePeer;
       dc.onmessage = ({ data }) => {
         let state;
         try {
@@ -239,6 +240,7 @@
       };
       dc.onclose = () => this._removePeer(peerId);
       dc.onerror = (error) => console.warn('[net] Data channel error:', error);
+      if (dc.readyState === 'open') announcePeer();
     }
 
     _removePeer(peerId) {

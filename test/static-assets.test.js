@@ -9,6 +9,7 @@ const root = path.join(__dirname, '..');
 const publicDirectory = path.join(root, 'public');
 const html = fs.readFileSync(path.join(publicDirectory, 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(publicDirectory, 'css/style.css'), 'utf8');
+const game = fs.readFileSync(path.join(publicDirectory, 'js/game.js'), 'utf8');
 const workflow = fs.readFileSync(path.join(root, '.github/workflows/pages.yml'), 'utf8');
 
 test('keeps local page assets relative and present for the /XRRC/ subpath', () => {
@@ -47,4 +48,19 @@ test('generates Pages runtime configuration for the canonical site', () => {
   assert.match(workflow, /XRRC_SIGNAL_URL: \$\{\{ vars\.XRRC_SIGNAL_URL \}\}/);
   assert.match(workflow, /siteUrl: 'https:\/\/lab\.liambroza\.com\/XRRC\/'/);
   assert.match(workflow, /path: public/);
+});
+
+test('ships an accessible share dialog with lazy QR loading', () => {
+  assert.match(
+    html,
+    /<dialog[\s\S]+id="share-dialog"[\s\S]+aria-labelledby="share-title"[\s\S]+aria-describedby="share-description"/
+  );
+  assert.match(html, /id="share-url" type="url" readonly/);
+  assert.match(html, /id="share-close"/);
+  assert.match(html, /id="share-email"/);
+  assert.match(html, /id="share-sms"/);
+  assert.match(html, /id="share-whatsapp"[\s\S]+rel="noopener noreferrer"/);
+  assert.match(html, /src="js\/share-core\.js"/);
+  assert.doesNotMatch(html, /qrcode@/);
+  assert.match(game, /import\(QR_CODE_SOURCE\)/);
 });

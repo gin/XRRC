@@ -174,6 +174,36 @@
                   <span class="vehicle-glyph helicopter-glyph" aria-hidden="true"></span>
                   <strong>Heli</strong>
                 </label>
+                <label class="vehicle-toggle">
+                  <input type="radio" name="vehicle" value="toy-car-1" />
+                  <span class="vehicle-glyph" aria-hidden="true"></span>
+                  <strong>Racer 1</strong>
+                </label>
+                <label class="vehicle-toggle">
+                  <input type="radio" name="vehicle" value="toy-car-2" />
+                  <span class="vehicle-glyph" aria-hidden="true"></span>
+                  <strong>Racer 2</strong>
+                </label>
+                <label class="vehicle-toggle">
+                  <input type="radio" name="vehicle" value="toy-car-3" />
+                  <span class="vehicle-glyph" aria-hidden="true"></span>
+                  <strong>Racer 3</strong>
+                </label>
+                <label class="vehicle-toggle">
+                  <input type="radio" name="vehicle" value="toy-car-taxi" />
+                  <span class="vehicle-glyph" aria-hidden="true"></span>
+                  <strong>Taxi</strong>
+                </label>
+                <label class="vehicle-toggle">
+                  <input type="radio" name="vehicle" value="toy-car-cop" />
+                  <span class="vehicle-glyph" aria-hidden="true"></span>
+                  <strong>Police</strong>
+                </label>
+                <label class="vehicle-toggle">
+                  <input type="radio" name="vehicle" value="car1" />
+                  <span class="vehicle-glyph" aria-hidden="true"></span>
+                  <strong>Coupe</strong>
+                </label>
               </div>
             </fieldset>
 
@@ -245,7 +275,7 @@
               <button id="desktop-btn" class="race-btn secondary-btn" type="button">
                 <span>Desktop race</span><small>Keyboard + gamepad</small>
               </button>
-              <button id="eighthwall-btn" class="text-btn" type="button">
+              <button id="eighthwall-btn" class="text-btn" type="button" disabled>
                 Use camera mode instead
               </button>
             </div>
@@ -279,6 +309,8 @@
           </div>
         </div>
 
+        <div id="vehicle-bay" class="vehicle-bay" role="listbox" aria-label="Vehicle bay"></div>
+
         <div id="countdown" class="countdown" role="status" aria-live="assertive"></div>
         <div id="toast" class="toast" role="status" aria-live="polite"></div>
         <div id="place-hint" class="hint-banner">
@@ -301,15 +333,98 @@
       </section>
     </div>
 
+    <dialog
+      id="share-dialog"
+      class="share-dialog"
+      aria-labelledby="share-title"
+      aria-describedby="share-description"
+    >
+      <div class="share-sheet">
+        <header class="share-header">
+          <p class="share-kicker" data-i18n="share.kicker">XRRC // Pit pass</p>
+          <button id="share-close" class="share-close" type="button" data-i18n="share.close">
+            Close
+          </button>
+          <h2 id="share-title" data-i18n="share.title">Call in your pit crew</h2>
+          <p id="share-description" data-i18n="share.description">
+            Scan the code or send the room pass.
+          </p>
+        </header>
+
+        <div class="share-layout">
+          <figure id="share-qr-card" class="share-qr-card" data-state="idle">
+            <canvas
+              id="share-qr"
+              width="240"
+              height="240"
+              role="img"
+              data-i18n-aria-label="share.qrLabel"
+              aria-busy="false"
+            ></canvas>
+            <figcaption>
+              <span id="share-room-code">#BACKYARD</span>
+              <strong data-i18n="share.scan">Scan to join</strong>
+            </figcaption>
+            <p id="share-qr-status" class="share-qr-status" aria-live="polite"></p>
+          </figure>
+
+          <div class="share-details">
+            <label for="share-url" data-i18n="share.linkLabel">Room link</label>
+            <div class="share-url-row">
+              <input id="share-url" type="url" readonly spellcheck="false" />
+              <button id="share-copy" class="share-copy" type="button" data-i18n="share.copy">
+                Copy link
+              </button>
+            </div>
+
+            <div
+              class="share-actions"
+              data-i18n-aria-label="share.actions"
+              aria-label="Ways to share"
+            >
+              <button
+                id="share-native"
+                class="share-action share-action-primary"
+                type="button"
+                hidden
+                data-i18n="share.native"
+              >
+                Share
+              </button>
+              <a id="share-email" class="share-action" data-i18n="share.email">Email</a>
+              <a id="share-sms" class="share-action" data-i18n="share.sms">Text</a>
+              <a
+                id="share-whatsapp"
+                class="share-action"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-i18n="share.whatsapp"
+              >
+                WhatsApp
+              </a>
+            </div>
+
+            <p class="share-privacy" data-i18n="share.privacy">
+              The pass carries this room setup. Private relay access still controls who can join.
+            </p>
+          </div>
+        </div>
+      </div>
+    </dialog>
+
     <script src="runtime-config.js"></script>
     <script src="js/config.js"></script>
     <script src="js/i18n.js"></script>
+    <script src="js/share-core.js"></script>
     <script src="js/game-core.js"></script>
     <script src="js/controls-core.js"></script>
     <script src="js/xr-core.js"></script>
     <script src="js/network.js"></script>
     <script src="js/audio.js"></script>
     <script src="js/controls.js"></script>
+    <script type="importmap">
+      { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.183.2/build/three.module.min.js" } }
+    </script>
     <script type="module">
       import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.183.2/build/three.module.min.js';
       window.THREE = THREE;
