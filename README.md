@@ -52,13 +52,24 @@ after signaling, but fully serverless discovery is not available in browsers.
 
 ### Car models
 
-`public/js/game.js` loads one of the `.glb` files in `public/assets/cars/` per car, chosen deterministically
-from a hash of the car's player color so every client renders the same model for a given peer without any
-extra network protocol. Each model is fetched once via `GLTFLoader`, cached, and cloned per car instance; the
-clone is auto-centered, grounded, uniformly scaled to a ~0.3 m footprint, and yaw-corrected 180° because the
-source models face +Z while the game's forward direction is -Z. Any node with "wheel" in its name is spun
-during `Car.update()`; models without named wheel nodes simply skip that animation. If a model fails to load,
-`Car` falls back to the original procedural box car so gameplay never breaks.
+`public/js/game.js` loads `.glb` files from `public/assets/cars/` via `GLTFLoader`, cached per file and
+cloned per car instance. Each clone is auto-centered, grounded, uniformly scaled to a ~0.3 m footprint, and
+yaw-corrected 180° because the source models face +Z while the game's forward direction is -Z. Any node with
+"wheel" in its name is spun during `Car.update()`; models without named wheel nodes simply skip that
+animation. If a model fails to load, `Car` falls back to the original procedural box car so gameplay never
+breaks. Remote peers pick a model deterministically from a hash of their player color, so every client
+renders the same model for a given peer without any extra network protocol.
+
+### Garage
+
+After entering the world, a dock at the bottom of the screen lists all seven car models as plates with
+rendered thumbnails (snapshotted once per model with an offscreen `THREE.WebGLRenderer`). Clicking an
+available plate spawns that car onto the track and hands it control; whatever car was previously controlled
+is left parked exactly where it stopped. Clicking a plate whose car is already on the track (shown dimmed
+with a dashed border) removes that car from the world and returns it to the plate — if it was the controlled
+car, no car responds to input until another is summoned. `Game` tracks this with a `worldCars` map keyed by
+model file and a single `controlledFile`; only the controlled car receives `car-input` events and runs
+physics in `update()`, so parked cars stay inert without any extra bookkeeping.
 
 ## 8th Wall licensing
 

@@ -17,7 +17,6 @@ const CAR_MODEL_FILES = [
   'assets/cars/toy-car-1.glb',
   'assets/cars/toy-car-2.glb',
   'assets/cars/toy-car-3.glb',
-  'assets/cars/toy-car-4.glb',
   'assets/cars/toy-car-taxi.glb',
   'assets/cars/toy-car-cop.glb',
   'assets/cars/car1.glb',
@@ -50,27 +49,66 @@ function pickCarModel(color) {
   return CAR_MODEL_FILES[hashString(String(color)) % CAR_MODEL_FILES.length];
 }
 
+const CAR_MODEL_NAMES = ['Racer 1', 'Racer 2', 'Racer 3', 'Taxi', 'Police', 'Coupe'];
+
+function carDisplayName(file) {
+  return CAR_MODEL_NAMES[CAR_MODEL_FILES.indexOf(file)] || 'Car';
+}
+
+// Offscreen renderer reused to snapshot each car model for the garage dock.
+let thumbnailRenderer = null;
+let thumbnailCanvas = null;
+const thumbnailCache = new Map(); // file -> data URL
+
+function renderCarThumbnail(file, source) {
+  if (thumbnailCache.has(file)) return thumbnailCache.get(file);
+  const size = 96;
+  if (!thumbnailRenderer) {
+    thumbnailCanvas = document.createElement('canvas');
+    thumbnailCanvas.width = size;
+    thumbnailCanvas.height = size;
+    thumbnailRenderer = new THREE.WebGLRenderer({ canvas: thumbnailCanvas, antialias: true, alpha: true });
+    thumbnailRenderer.setSize(size, size);
+  }
+
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 3));
+  const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+  sun.position.set(2, 4, 3);
+  scene.add(sun);
+
+  const clone = source.clone(true);
+  const box = new THREE.Box3().setFromObject(clone);
+  const size3 = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  clone.position.set(-center.x, -center.y, -center.z);
+  scene.add(clone);
+
+  const maxDim = Math.max(size3.x, size3.y, size3.z) || 1;
+  const camera = new THREE.PerspectiveCamera(35, 1, 0.01, maxDim * 20);
+  camera.position.set(maxDim * 1.3, maxDim * 1.05, maxDim * 1.3);
+  camera.lookAt(0, 0, 0);
+
+  thumbnailRenderer.setClearColor(0x000000, 0);
+  thumbnailRenderer.render(scene, camera);
+  const dataUrl = thumbnailCanvas.toDataURL('image/png');
+  thumbnailCache.set(file, dataUrl);
+  return dataUrl;
+}
+
 class Car {
-  constructor(color, isLocal) {
+  constructor(file, color = 0xe63946) {
     this.group = new THREE.Group();
-    this.isLocal = isLocal;
+    this.file = file;
     this.velocity = 0;
     this.throttle = 0;
     this.steering = 0;
     this.broadcastTimer = 0;
     this.wheels = [];
-    this._load(color);
-
-    if (isLocal) {
-      document.addEventListener('car-input', (event) => {
-        this.throttle = event.detail.throttle;
-        this.steering = event.detail.steering;
-      });
-    }
+    this._load(file, color);
   }
 
-  async _load(color) {
-    const file = pickCarModel(color);
+  async _load(file, color) {
     try {
       const source = await loadCarModel(file);
       const model = source.clone(true);
@@ -129,7 +167,6 @@ class Car {
   }
 
   update(delta) {
-    if (!this.isLocal) return;
     const dt = Math.min(delta, 0.05);
     const speed = 1.2;
 
@@ -193,13 +230,94 @@ class Game {
     this.gameRoot = new THREE.Group();
     this.gameRoot.visible = false;
     this.scene.add(this.gameRoot);
-    this.localCar = new Car(0xe63946, true);
-    this.gameRoot.add(this.localCar.group);
+    this.worldCars = new Map(); // file -> Car currently placed in the scene
+    this.controlledFile = null;
+    this.input = { throttle: 0, steering: 0 };
+    document.addEventListener('car-input', (event) => {
+      this.input = event.detail;
+    });
     this.reticle = this._createReticle();
     this.scene.add(this.reticle);
     this._buildTrack();
     this._addLights();
+    this._initGarage();
     window.addEventListener('resize', () => this.resize());
+  }
+
+  _initGarage() {
+    const dock = document.getElementById('garage-dock-inner');
+    if (!dock) return;
+    dock.innerHTML = '';
+    this.platesByFile = new Map();
+    for (const file of CAR_MODEL_FILES) {
+      const plate = document.createElement('button');
+      plate.type = 'button';
+      plate.className = 'car-plate';
+      plate.setAttribute('aria-label', carDisplayName(file));
+      const img = document.createElement('img');
+      img.alt = '';
+      const name = document.createElement('span');
+      name.className = 'car-plate-name';
+      name.textContent = carDisplayName(file);
+      plate.append(img, name);
+      plate.addEventListener('click', () => this._onPlateClick(file));
+      dock.appendChild(plate);
+      this.platesByFile.set(file, plate);
+
+      loadCarModel(file)
+        .then((source) => {
+          img.src = renderCarThumbnail(file, source);
+        })
+        .catch(() => {});
+    }
+    this._summon(CAR_MODEL_FILES[0]);
+  }
+
+  // Move a car from its garage plate onto the track and take control of it.
+  // The previously controlled car (if any) is left parked where it stands.
+  _summon(file) {
+    if (this.worldCars.has(file)) return;
+    const car = new Car(file);
+    const index = CAR_MODEL_FILES.indexOf(file);
+    const cols = CAR_MODEL_FILES.length;
+    car.group.position.set((index - (cols - 1) / 2) * 0.28, 0, TRACK_SIZE / 2 - 0.28);
+    this.gameRoot.add(car.group);
+    this.worldCars.set(file, car);
+
+    const previousControlled = this.controlledFile;
+    this.controlledFile = file;
+    this._syncPlate(file);
+    if (previousControlled) this._syncPlate(previousControlled);
+  }
+
+  // Remove a car from the track and return it to its (now available) plate.
+  _recall(file) {
+    const car = this.worldCars.get(file);
+    if (!car) return;
+    this.gameRoot.remove(car.group);
+    this.worldCars.delete(file);
+    if (this.controlledFile === file) this.controlledFile = null;
+    this._syncPlate(file);
+  }
+
+  _onPlateClick(file) {
+    if (this.worldCars.has(file)) this._recall(file);
+    else this._summon(file);
+  }
+
+  _syncPlate(file) {
+    const plate = this.platesByFile.get(file);
+    if (!plate) return;
+    plate.classList.toggle('is-empty', this.worldCars.has(file));
+    plate.classList.toggle('is-controlled', file === this.controlledFile);
+  }
+
+  updateControlledCar(delta) {
+    const car = this.controlledFile ? this.worldCars.get(this.controlledFile) : null;
+    if (!car) return;
+    car.throttle = this.input.throttle;
+    car.steering = this.input.steering;
+    car.update(delta);
   }
 
   _addLights() {
@@ -310,7 +428,7 @@ class Game {
   }
 
   render() {
-    this.localCar.update(this.clock.getDelta());
+    this.updateControlledCar(this.clock.getDelta());
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -349,7 +467,7 @@ function startNetwork(room) {
   }
   networkManager = new window.NetworkManager();
   networkManager.addEventListener('peer-join', ({ detail }) => {
-    const car = new Car(detail.color, false);
+    const car = new Car(pickCarModel(detail.color), detail.color);
     car.group.position.x = remoteCars.size * 0.3;
     game.gameRoot.add(car.group);
     remoteCars.set(detail.id, car);
@@ -447,7 +565,7 @@ async function start8thWall() {
           document.getElementById('place-hint').classList.add('hidden');
         },
         onUpdate: () => {
-          if (game) game.localCar.update(game.clock.getDelta());
+          if (game) game.updateControlledCar(game.clock.getDelta());
         },
       },
     ]);
