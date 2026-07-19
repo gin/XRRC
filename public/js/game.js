@@ -8,10 +8,12 @@ const Config = window.XRRCConfig;
 const XRCore = window.XRRCXRCore;
 const ControlsCore = window.XRRCControlsCore;
 const I18n = window.XRRCI18n;
+const ShareCore = window.XRRCShareCore;
 const TRACK_BOUNDS = Object.freeze({ x: 4.15, z: 3.15 });
 const START_GRID = Object.freeze({ x: 0.8, z: 2.25, heading: Math.PI / 2 });
 const RAMP_ZONE = Object.freeze({ x: -1.45, z: 0.08 });
 const ROAD_WIDTH = 1.18;
+const QR_CODE_SOURCE = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm';
 const remoteCars = new Map();
 
 // GLB car skins: visual reskins of the 'rally' physics profile, loaded on
@@ -157,6 +159,9 @@ function prefersQuestQuality() {
 let game = null;
 let networkManager = null;
 let toastTimer = null;
+let shareCopyTimer = null;
+let shareQrRequest = 0;
+let qrCodeModulePromise = null;
 let webXRSupportChecked = false;
 let webXRSupported = false;
 const audioManager = new window.XRRCAudioManager();
@@ -895,6 +900,25 @@ let thumbnailScene = null;
 let thumbnailCamera = null;
 const thumbnailCache = new Map(); // type -> Promise<string data URL>
 
+function scheduleBackgroundTask(callback) {
+  if (typeof window.requestIdleCallback === 'function') {
+    return {
+      id: window.requestIdleCallback(callback, { timeout: 750 }),
+      type: 'idle',
+    };
+  }
+  return {
+    id: window.setTimeout(callback, 32),
+    type: 'timeout',
+  };
+}
+
+function cancelBackgroundTask(task) {
+  if (!task) return;
+  if (task.type === 'idle') window.cancelIdleCallback(task.id);
+  else window.clearTimeout(task.id);
+}
+
 function ensureThumbnailRig() {
   if (thumbnailRenderer) return;
   const size = 128;
@@ -972,6 +996,8 @@ class Game {
     this.dustTimer = 0;
     this.smokeTimer = 0;
     this.telemetryTimer = 0;
+    this.thumbnailGeneration = 0;
+    this.thumbnailTask = null;
     this.cameraTarget = new THREE.Vector3();
     this.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -1056,6 +1082,7 @@ class Game {
     bay.innerHTML = '';
     bay.style.setProperty('--bay-columns', String(Math.ceil(VEHICLE_TYPES.length / 3)));
     this.vehicleSlots = new Map();
+    const thumbnailQueue = [];
     for (const type of VEHICLE_TYPES) {
       const slot = document.createElement('button');
       slot.type = 'button';
@@ -1069,9 +1096,29 @@ class Game {
       slot.addEventListener('click', () => this._onVehicleSlotClick(type));
       bay.appendChild(slot);
       this.vehicleSlots.set(type, slot);
-      renderVehicleThumbnail(type).then((url) => { thumb.src = url; }).catch(() => {});
+      thumbnailQueue.push({ thumb, type });
     }
+    this._queueVehicleThumbnails(thumbnailQueue);
     this._syncVehicleBay();
+  }
+
+  _queueVehicleThumbnails(queue) {
+    const generation = ++this.thumbnailGeneration;
+    const renderNext = () => {
+      if (generation !== this.thumbnailGeneration || queue.length === 0) return;
+      this.thumbnailTask = scheduleBackgroundTask(async () => {
+        this.thumbnailTask = null;
+        const { thumb, type } = queue.shift();
+        try {
+          const url = await renderVehicleThumbnail(type);
+          if (generation === this.thumbnailGeneration && thumb.isConnected) thumb.src = url;
+        } catch (error) {
+          console.warn(`[vehicle] failed to render ${type} thumbnail`, error);
+        }
+        renderNext();
+      });
+    };
+    renderNext();
   }
 
   _syncVehicleBay() {
@@ -1929,6 +1976,9 @@ class Game {
   }
 
   destroy() {
+    this.thumbnailGeneration += 1;
+    cancelBackgroundTask(this.thumbnailTask);
+    this.thumbnailTask = null;
     window.removeEventListener('resize', this._resizeHandler);
     if (this._placementHandler) {
       this.canvas.removeEventListener('click', this._placementHandler);
@@ -2069,26 +2119,122 @@ function copyText(value) {
   return copied ? Promise.resolve() : Promise.reject(new Error('Copy failed'));
 }
 
+function loadQrCodeModule() {
+  if (!qrCodeModulePromise) {
+    qrCodeModulePromise = import(QR_CODE_SOURCE)
+      .then((module) => {
+        const qrCode = module.default || module;
+        if (typeof qrCode.toCanvas !== 'function') {
+          throw new TypeError('The QR code renderer is unavailable.');
+        }
+        return qrCode;
+      })
+      .catch((error) => {
+        qrCodeModulePromise = null;
+        throw error;
+      });
+  }
+  return qrCodeModulePromise;
+}
+
+function resetShareCopyButton() {
+  window.clearTimeout(shareCopyTimer);
+  shareCopyTimer = null;
+  const button = document.getElementById('share-copy');
+  button.dataset.state = 'idle';
+  button.textContent = I18n.t('share.copy');
+}
+
+async function renderShareQrCode(shareUrl) {
+  const request = ++shareQrRequest;
+  const card = document.getElementById('share-qr-card');
+  const canvas = document.getElementById('share-qr');
+  const status = document.getElementById('share-qr-status');
+  card.dataset.state = 'loading';
+  canvas.setAttribute('aria-busy', 'true');
+  status.textContent = I18n.t('share.qrLoading');
+
+  try {
+    const qrCode = await loadQrCodeModule();
+    await qrCode.toCanvas(canvas, shareUrl, {
+      color: {
+        dark: '#24251fff',
+        light: '#f4ead2ff',
+      },
+      errorCorrectionLevel: 'M',
+      margin: 2,
+      width: 240,
+    });
+    if (request !== shareQrRequest) return;
+    canvas.dataset.shareUrl = shareUrl;
+    canvas.setAttribute('aria-busy', 'false');
+    card.dataset.state = 'ready';
+    status.textContent = I18n.t('share.qrReady');
+  } catch (error) {
+    if (request !== shareQrRequest) return;
+    canvas.setAttribute('aria-busy', 'false');
+    card.dataset.state = 'error';
+    status.textContent = I18n.t('share.qrError');
+    console.error('[share] QR code generation failed:', error);
+  }
+}
+
 function setupShareLink(room, signalValue) {
   const button = document.getElementById('share-link');
+  const dialog = document.getElementById('share-dialog');
+  const closeButton = document.getElementById('share-close');
+  const copyButton = document.getElementById('share-copy');
+  const nativeButton = document.getElementById('share-native');
+  const shareInput = document.getElementById('share-url');
   const shareUrl = Config.buildShareUrl(location.href, room, signalValue);
-  button.hidden = false;
-  button.onclick = async () => {
+  const shareData = {
+    title: I18n.t('race.roomTitle', { room }),
+    text: I18n.t('race.roomInvite'),
+    url: shareUrl,
+  };
+  const targets = ShareCore.buildShareTargets(shareData);
+
+  shareInput.value = shareUrl;
+  shareInput.onfocus = () => shareInput.select();
+  document.getElementById('share-room-code').textContent = `#${room.toUpperCase()}`;
+  document.getElementById('share-email').href = targets.email;
+  document.getElementById('share-sms').href = targets.sms;
+  document.getElementById('share-whatsapp').href = targets.whatsapp;
+
+  nativeButton.hidden = typeof navigator.share !== 'function';
+  nativeButton.onclick = async () => {
     try {
-      if (navigator.share && matchMedia('(pointer: coarse)').matches) {
-        await navigator.share({
-          title: I18n.t('race.roomTitle', { room }),
-          text: I18n.t('race.roomInvite'),
-          url: shareUrl,
-        });
-      } else {
-        await copyText(shareUrl);
-        audioManager.playCue('copy');
-        showToast(I18n.t('race.copied'));
-      }
+      await navigator.share(shareData);
     } catch (error) {
       if (error.name !== 'AbortError') showToast(I18n.t('race.shareFailed'));
     }
+  };
+
+  copyButton.onclick = async () => {
+    try {
+      await copyText(shareUrl);
+      copyButton.dataset.state = 'success';
+      copyButton.textContent = I18n.t('share.copied');
+      audioManager.playCue('copy');
+      showToast(I18n.t('race.copied'));
+      window.clearTimeout(shareCopyTimer);
+      shareCopyTimer = window.setTimeout(resetShareCopyButton, 1800);
+    } catch {
+      showToast(I18n.t('race.shareFailed'));
+    }
+  };
+
+  closeButton.onclick = () => dialog.close();
+  dialog.onclick = (event) => {
+    if (event.target === dialog) dialog.close();
+  };
+
+  button.hidden = false;
+  button.onclick = () => {
+    resetShareCopyButton();
+    if (!dialog.open) dialog.showModal();
+    const qrCanvas = document.getElementById('share-qr');
+    if (qrCanvas.dataset.shareUrl !== shareUrl) renderShareQrCode(shareUrl);
   };
 }
 
@@ -2160,6 +2306,9 @@ function enterGame(runtime = null) {
 }
 
 function restoreLobby(message) {
+  const shareDialog = document.getElementById('share-dialog');
+  if (shareDialog.open) shareDialog.close();
+  shareQrRequest += 1;
   if (networkManager) networkManager.disconnect();
   networkManager = null;
   for (const car of remoteCars.values()) {
@@ -2412,7 +2561,9 @@ async function bootstrap() {
       document.getElementById('signal-input').focus();
     }
   });
-  document.getElementById('eighthwall-btn').addEventListener('click', start8thWall);
+  const eighthWallButton = document.getElementById('eighthwall-btn');
+  eighthWallButton.addEventListener('click', start8thWall);
+  eighthWallButton.disabled = false;
 
   if (getSignalValue()) {
     document.getElementById('signal-panel').open = true;

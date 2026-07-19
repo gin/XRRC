@@ -20,6 +20,7 @@ async function waitForRenderedGame(page) {
 }
 
 test('renders every vehicle with the optimized circuit', async ({ page }) => {
+  test.slow();
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
 

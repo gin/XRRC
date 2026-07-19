@@ -26,10 +26,12 @@ private behind Tailscale Serve.
   vibration and controller rumble.
 - Private-room WebRTC with origin-restricted signaling, health checks,
   reconnects, sequence validation, interpolation, and short-horizon prediction.
+- A pit-pass invite dialog with a locally rendered QR code, copy, native share,
+  email, text, and WhatsApp actions.
 - Native immersive WebXR and an on-demand 8th Wall camera pipeline.
 - A Quest quality profile and instanced track props that keep the reference
   scene within the automated render budget.
-- 35 Node tests, 8 Playwright browser tests, CI, and deterministic screenshots.
+- 40 Node tests, 11 Playwright browser tests, CI, and deterministic screenshots.
 
 ## Visual gallery
 
@@ -70,8 +72,9 @@ Open <http://127.0.0.1:3000>. Local pages automatically use the bundled
 signaling service; clear the multiplayer relay field or add `?signal=off` for a
 solo race.
 
-The browser imports Three.js and Google Fonts from their CDNs. The 8th Wall
-packages are fetched only when **Use 8th Wall** is selected.
+The browser imports Three.js and Google Fonts from their CDNs. The QR renderer
+is fetched only when **Invite** is opened, and the 8th Wall packages are fetched
+only when **Use 8th Wall** is selected.
 
 ## Player reference
 
@@ -124,6 +127,20 @@ Analog controls use a `0.14` deadzone. XR, keyboard, touch, and gamepad input
 are mixed per axis in that priority order. Input is cleared when the browser
 loses focus. Compatible gamepads receive dual-rumble feedback on resets and
 impacts; mobile browsers may use `navigator.vibrate()` for impacts.
+
+### Invite your pit crew
+
+The HUD **Invite** button opens a keyboard-accessible pit pass with:
+
+- a QR code generated locally in the browser;
+- the complete room URL and one-tap copy feedback;
+- the device's native share sheet when available;
+- encoded email, text-message, and WhatsApp links.
+
+The QR library is loaded on demand from jsDelivr, but the room URL is encoded on
+the device and is not sent to a QR image service. Invite URLs preserve the room,
+static-host subpath, relay, and any unrelated query parameters. Relay access
+still determines who can join a private heat.
 
 ### Driving, collisions, and feedback
 
@@ -336,9 +353,10 @@ calls** and **16,258 triangles**. Browser tests enforce a ceiling of 90 draw
 calls and 90 geometries for every procedural vehicle class. GLB skin complexity
 depends on the selected asset.
 
-The in-race bay uses a separate 128 x 128 offscreen renderer. Each thumbnail is
-rendered once, cached as a data URL, and its temporary vehicle geometry is
-disposed.
+The in-race bay uses a separate 128 x 128 offscreen renderer. Thumbnails are
+generated one at a time during idle windows so model parsing cannot delay the
+first rendered frame or multiplayer handshake. Each result is cached as a data
+URL and its temporary vehicle geometry is disposed.
 
 Inspect the current frame from DevTools:
 
@@ -362,6 +380,7 @@ vehicle types, road normals, and shadow state.
 | `public/js/controls-core.js` | Deadzones and device-independent control mappings |
 | `public/js/network.js` | WebSocket signaling client and WebRTC peer data channels |
 | `public/js/config.js` | Room, relay, health, and invite URL normalization |
+| `public/js/share-core.js` | Email, text, and WhatsApp invite target encoding |
 | `public/js/xr-core.js` | Native WebXR session and 8th Wall runtime contracts |
 | `public/js/audio.js` | Procedural music, engine, skid, cue, and impact audio |
 | `public/js/i18n.js` | English, Spanish, and French dictionaries and persistence |
@@ -388,9 +407,9 @@ npx playwright install chromium
 | --- | --- |
 | `npm start` | Start the static app and signaling service |
 | `npm run check:syntax` | Parse-check the server and browser JavaScript |
-| `npm test` | Run 35 Node tests |
+| `npm test` | Run 40 Node tests |
 | `npm run check` | Run syntax checks and Node tests |
-| `npm run test:e2e` | Run 8 Chromium browser tests |
+| `npm run test:e2e` | Run 11 Chromium browser tests |
 | `npm run test:e2e:update` | Update Playwright snapshots if added later |
 | `npm run screenshots` | Replace the deterministic gallery captures |
 
@@ -402,6 +421,8 @@ CI uses Node.js 22, installs Chromium with system dependencies, runs
 - vehicle physics, bounds, drift, reset, prediction, and sequence rejection;
 - keyboard, gamepad, XInput, touch, and Quest-style controller mappings;
 - room and relay URL normalization;
+- invite message encoding, accessible dialog structure, lazy QR rendering,
+  clipboard/native share actions, direct share links, and mobile layout;
 - origin-restricted health and signaling behavior plus room isolation;
 - relative static assets, accessibility fallbacks, and Pages configuration;
 - native WebXR and complete 8th Wall pipeline contracts;

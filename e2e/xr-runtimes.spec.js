@@ -56,7 +56,9 @@ test('starts the complete 8th Wall pipeline with camera runtime modules', async 
   });
 
   await page.goto('/?signal=off');
-  await page.locator('#eighthwall-btn').click();
+  const cameraButton = page.locator('#eighthwall-btn');
+  await expect(cameraButton).toBeEnabled();
+  await cameraButton.click();
   await page.waitForFunction(() => window.__XR8_RUN__ === true);
 
   await expect(page.locator('#hud')).toBeVisible();

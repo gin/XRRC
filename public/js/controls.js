@@ -20,7 +20,7 @@
 
     _setupKeyboard() {
       document.addEventListener('keydown', (event) => {
-        if (event.target.matches('input, textarea, select')) return;
+        if (event.target.matches('input, textarea, select') || event.target.closest('dialog')) return;
         if (event.key.startsWith('Arrow')) event.preventDefault();
         this._keys.add(event.key.toLowerCase());
         if (event.key.toLowerCase() === 'r' && !event.repeat) {
