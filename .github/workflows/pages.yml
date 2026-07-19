@@ -23,6 +23,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/configure-pages@v6
+      - name: Configure deployment
+        env:
+          XRRC_SIGNAL_URL: ${{ vars.XRRC_SIGNAL_URL }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const config = {
+            siteUrl: 'https://lab.liambroza.com/XRRC/',
+            signalUrl: process.env.XRRC_SIGNAL_URL || '',
+          };
+          fs.writeFileSync(
+            'public/runtime-config.js',
+            `(function configureXRRC(root) {
+            'use strict';
+            root.XRRC_DEPLOYMENT = Object.freeze(${JSON.stringify(config)});
+          })(window);
+          `
+          );
+          NODE
       - uses: actions/upload-pages-artifact@v5
         with:
           path: public
