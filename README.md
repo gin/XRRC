@@ -42,12 +42,22 @@ after signaling, but fully serverless discovery is not available in browsers.
 
 | File | Purpose |
 |------|---------|
-| `public/index.html` | AR-mode and track-prop selection, canvas, and HUD |
-| `public/js/game.js` | Three.js scene, cars, track props, WebXR hit testing, and 8th Wall pipeline |
+| `public/index.html` | AR-mode, vehicle-bay, and track-prop selection, canvas, and HUD |
+| `public/js/game.js` | Three.js scene, vehicles, track props, WebXR hit testing, and 8th Wall pipeline |
 | `public/js/controls.js` | Touch joystick and keyboard controls |
 | `public/js/network.js` | WebSocket signaling and WebRTC data channels |
+| `public/assets/cars/*.glb` | Optional GLB vehicle skins, loaded on demand via `GLTFLoader` |
 | `server.js` | Static local server and optional multiplayer signaling |
 | `.github/workflows/pages.yml` | Static GitHub Pages deployment |
+
+### Vehicles
+
+The lobby's vehicle bay picks a physics profile (rally, buggy, truck, motorcycle, tank, plane,
+helicopter), each with procedurally built geometry. Six entries (Racer 1-3, Taxi, Police, Coupe) are
+GLB skins instead: the same rally handling, but `Vehicle.setType()` swaps in a `.glb` model loaded from
+`public/assets/cars/` once it's fetched, showing the procedural rally body as a placeholder until then.
+Vehicle selection - including GLB skins - is broadcast with each network state update, so peers render
+the same model.
 
 ## 8th Wall licensing
 

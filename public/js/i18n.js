@@ -91,6 +91,12 @@
       'vehicle.tank': 'Mini tank',
       'vehicle.plane': 'Prop plane',
       'vehicle.helicopter': 'Helicopter',
+      'vehicle.toy-car-1': 'Racer 1',
+      'vehicle.toy-car-2': 'Racer 2',
+      'vehicle.toy-car-3': 'Racer 3',
+      'vehicle.toy-car-taxi': 'Taxi',
+      'vehicle.toy-car-cop': 'Police',
+      'vehicle.car1': 'Coupe',
     },
     es: {
       'meta.skip': 'Saltar a la configuracion',

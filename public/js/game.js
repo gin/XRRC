@@ -1,5 +1,7 @@
 'use strict';
 
+import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.183.2/examples/jsm/loaders/GLTFLoader.js';
+
 const THREE = window.THREE;
 const Core = window.XRRCGameCore;
 const Config = window.XRRCConfig;
@@ -11,6 +13,43 @@ const START_GRID = Object.freeze({ x: 0.8, z: 2.25, heading: Math.PI / 2 });
 const RAMP_ZONE = Object.freeze({ x: -1.45, z: 0.08 });
 const ROAD_WIDTH = 1.18;
 const remoteCars = new Map();
+
+// GLB car skins: visual reskins of the 'rally' physics profile, loaded on
+// demand from public/assets/cars/. Each glb was authored nose-forward on
+// +Z, but the game's forward direction at yaw 0 is -Z, so loaded models
+// get a 180deg yaw correction (confirmed against wheel-node placement and
+// isometric renders for every model in the set).
+const GLB_SKINS = Object.freeze({
+  'toy-car-1': { file: 'assets/cars/toy-car-1.glb' },
+  'toy-car-2': { file: 'assets/cars/toy-car-2.glb' },
+  'toy-car-3': { file: 'assets/cars/toy-car-3.glb' },
+  'toy-car-taxi': { file: 'assets/cars/toy-car-taxi.glb' },
+  'toy-car-cop': { file: 'assets/cars/toy-car-cop.glb' },
+  car1: { file: 'assets/cars/car1.glb' },
+});
+const GLB_SKIN_YAW_OFFSET = Math.PI;
+const GLB_SKIN_LENGTH = 0.42; // matches the rally car's chassis depth (Z)
+const gltfLoader = new GLTFLoader();
+const glbModelCache = new Map(); // file -> Promise<THREE.Object3D>
+
+function loadGLBModel(file) {
+  if (!glbModelCache.has(file)) {
+    glbModelCache.set(
+      file,
+      new Promise((resolve, reject) => {
+        gltfLoader.load(file, (gltf) => resolve(gltf.scene), undefined, reject);
+      })
+    );
+  }
+  return glbModelCache.get(file);
+}
+
+// Vehicle-bay selection can name a physics type (rally, buggy, ...) or a
+// GLB skin id; GLB skins pass through untouched so Vehicle can load them,
+// everything else is sanitized by the physics layer's normalizer.
+function normalizeVehicleSelection(value) {
+  return Object.hasOwn(GLB_SKINS, value) ? value : Core.normalizeVehicleType(value);
+}
 
 function prefersQuestQuality() {
   const requestedQuality = new URLSearchParams(window.location.search).get('quality');
@@ -262,10 +301,7 @@ class Vehicle {
     tip.castShadow = false;
   }
 
-  setType(type) {
-    const nextType = Core.normalizeVehicleType(type);
-    if (this.type === nextType && this.visual.children.length > 0) return;
-
+  _clearVisual() {
     this.visual.traverse((object) => {
       if (object.geometry) object.geometry.dispose();
       if (object.material) {
@@ -279,9 +315,25 @@ class Vehicle {
     this.wheels = [];
     this.frontWheelPivots = [];
     this.rotors = [];
+  }
+
+  setType(type) {
+    const nextType = normalizeVehicleSelection(type);
+    if (this.type === nextType && this.visual.children.length > 0) return;
+
+    this._clearVisual();
     this.type = nextType;
     this.spec = Core.getVehicleSpec(nextType);
     this.group.position.y = this.spec.rideHeight;
+
+    const skin = GLB_SKINS[nextType];
+    if (skin) {
+      // Procedural placeholder so the car is visible immediately; swapped
+      // for the real model once the glb finishes loading.
+      this._buildRally();
+      this._loadGLBSkin(nextType, skin);
+      return;
+    }
 
     const builders = {
       rally: () => this._buildRally(),
@@ -293,6 +345,37 @@ class Vehicle {
       helicopter: () => this._buildHelicopter(),
     };
     builders[nextType]();
+  }
+
+  async _loadGLBSkin(type, skin) {
+    try {
+      const source = await loadGLBModel(skin.file);
+      if (this.type !== type) return; // superseded by another setType() call
+
+      const model = source.clone(true);
+      model.traverse((node) => {
+        if (!node.isMesh) return;
+        node.castShadow = true;
+        node.receiveShadow = true;
+        if (/wheel/i.test(node.name)) this.wheels.push(node);
+      });
+
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      model.position.set(-center.x, -box.min.y, -center.z);
+
+      const scale = size.z > 0 ? GLB_SKIN_LENGTH / size.z : 1;
+      const pivot = new THREE.Group();
+      pivot.rotation.y = GLB_SKIN_YAW_OFFSET;
+      pivot.scale.setScalar(scale);
+      pivot.add(model);
+
+      this._clearVisual();
+      this.visual.add(pivot);
+    } catch (err) {
+      console.error(`[vehicle] failed to load ${skin.file}, keeping fallback body`, err);
+    }
   }
 
   _palette() {
@@ -1554,7 +1637,7 @@ function getSignalValue() {
 
 function getVehicleType() {
   const selected = document.querySelector('input[name="vehicle"]:checked');
-  return Core.normalizeVehicleType(selected ? selected.value : 'rally');
+  return normalizeVehicleSelection(selected ? selected.value : 'rally');
 }
 
 function setSignalStatus(state, message, summary) {
@@ -1965,7 +2048,7 @@ async function bootstrap() {
   }
   const room = params.get('room');
   if (room) document.getElementById('room-input').value = Config.normalizeRoom(room);
-  const requestedVehicle = Core.normalizeVehicleType(params.get('vehicle'));
+  const requestedVehicle = normalizeVehicleSelection(params.get('vehicle'));
   const vehicleInput = document.querySelector(
     `input[name="vehicle"][value="${requestedVehicle}"]`
   );
