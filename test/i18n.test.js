@@ -1,0 +1,30 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const I18n = require('../public/js/i18n');
+
+test('resolves query, stored, and browser languages with English fallback', () => {
+  assert.equal(I18n.resolveLanguage('?lang=fr', ['es'], 'en'), 'fr');
+  assert.equal(I18n.resolveLanguage('', ['de-DE', 'es-MX'], null), 'es');
+  assert.equal(I18n.resolveLanguage('', ['de-DE'], null), 'en');
+  assert.equal(I18n.normalizeLanguage('FR-ca'), 'fr');
+});
+
+test('translates interface and vehicle copy with interpolation', () => {
+  I18n.setLanguage('es', false);
+  assert.equal(I18n.t('mode.desktop'), 'Carrera de escritorio');
+  assert.equal(I18n.t('vehicle.helicopter'), 'Helicoptero');
+  assert.equal(
+    I18n.t('controller.connected', { label: 'XInput' }),
+    'XInput conectado'
+  );
+  I18n.setLanguage('en', false);
+});
+
+test('falls back to English when a localized key is missing', () => {
+  I18n.setLanguage('fr', false);
+  delete I18n.dictionaries.fr['race.copied'];
+  assert.equal(I18n.t('race.copied'), 'Room link copied');
+  I18n.setLanguage('en', false);
+});

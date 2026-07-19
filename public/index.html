@@ -2,65 +2,316 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-    <meta name="theme-color" content="#000000" />
-    <title>XRRC – WebXR RC Cars</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#e84a27" />
+    <meta
+      name="description"
+      content="XRRC is a tiny, noisy WebXR RC rally with multiplayer rooms, dirt, jumps, and procedural sound."
+    />
+    <meta property="og:title" content="XRRC Backyard Rally" />
+    <meta property="og:description" content="Build a tiny track. Make a huge mess." />
+    <meta property="og:url" content="https://lab.liambroza.com/XRRC/" />
+    <title>XRRC Backyard Rally</title>
+    <link rel="canonical" href="https://lab.liambroza.com/XRRC/" />
+    <link rel="icon" href="assets/xrrc-mark.svg" type="image/svg+xml" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="modulepreload"
+      href="https://cdn.jsdelivr.net/npm/three@0.183.2/build/three.module.min.js"
+      crossorigin
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;800&amp;family=Bungee&amp;display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="css/style.css" />
   </head>
 
   <body>
-    <canvas id="scene" aria-label="XRRC game view"></canvas>
+    <a class="skip-link" href="#lobby" data-i18n="meta.skip">Skip to race setup</a>
+    <canvas
+      id="scene"
+      aria-label="Interactive XRRC race track"
+      data-i18n-aria-label="meta.canvas"
+    ></canvas>
 
     <div id="overlay">
-      <main id="lobby">
-        <h1 class="logo">XRRC</h1>
-        <p class="tagline">WebXR RC Cars 2.0</p>
-
-        <div class="field">
-          <label for="room-input">Room</label>
-          <input id="room-input" type="text" value="default" maxlength="32" autocomplete="off" spellcheck="false" />
+      <main id="lobby" tabindex="-1">
+        <div class="track-backdrop" aria-hidden="true">
+          <span class="track-line track-line-one"></span>
+          <span class="track-line track-line-two"></span>
         </div>
 
-        <fieldset class="field props-field">
-          <legend>Track props</legend>
-          <label><input id="prop-jump" type="checkbox" checked /> Jump</label>
-          <label><input id="prop-loop" type="checkbox" checked /> Loop</label>
-        </fieldset>
+        <div class="lobby-grid">
+          <header class="hero-copy stage-item" style="--i: 0">
+            <p class="race-kicker"><span></span> <span data-i18n="hero.lab">Lab test no. 04</span></p>
+            <h1 class="logo" aria-label="XRRC">
+              <span>XR</span><span>RC</span>
+            </h1>
+            <p class="tagline">Build a tiny track.<br />Make a huge mess.</p>
+            <p class="hero-note">
+              A pocket-sized dirt rally for WebXR, phone, and desktop.
+              Bring your own pit crew.
+            </p>
+          </header>
 
-        <div class="mode-grid">
-          <button id="webxr-btn" class="primary-btn" disabled>Checking WebXR…</button>
-          <button id="eighthwall-btn" class="secondary-btn">Use 8th Wall</button>
-          <button id="desktop-btn" class="secondary-btn">Play in 3D</button>
+          <figure class="garage-art stage-item" style="--i: 1" aria-labelledby="garage-caption">
+            <svg viewBox="0 0 640 390" role="img" aria-labelledby="car-title car-desc">
+              <title id="car-title">Orange RC rally car waiting at a backyard starting line</title>
+              <desc id="car-desc">A stylized RC car kicks up dust beside traffic cones and a checkered flag.</desc>
+              <defs>
+                <pattern id="checks" width="36" height="36" patternUnits="userSpaceOnUse">
+                  <rect width="18" height="18" fill="#24251f" />
+                  <rect x="18" y="18" width="18" height="18" fill="#24251f" />
+                </pattern>
+              </defs>
+              <path class="art-sun" d="M485 38h112v112H485z" fill="#f1c644" />
+              <path d="M27 304C162 243 300 258 613 230v119H27z" fill="#3a3b34" />
+              <path d="M27 320c165-35 356-37 586-66" fill="none" stroke="#f4ead2" stroke-width="5" stroke-dasharray="34 24" />
+              <path d="M61 104h168v83H61z" fill="url(#checks)" />
+              <path d="M61 104h168v83H61z" fill="none" stroke="#24251f" stroke-width="8" />
+              <g class="art-cone">
+                <path d="M511 285l24-69 25 69z" fill="#e84a27" />
+                <path d="M521 256h29" stroke="#f4ead2" stroke-width="10" />
+                <path d="M498 285h76v15h-76z" fill="#24251f" />
+              </g>
+              <g class="art-dust" fill="#c3a86f">
+                <circle cx="176" cy="274" r="28" />
+                <circle cx="140" cy="286" r="18" />
+                <circle cx="103" cy="293" r="10" />
+              </g>
+              <g class="art-car">
+                <path d="M176 245l35-91h170l83 65 74 10 28 72H158z" fill="#e84a27" stroke="#24251f" stroke-width="10" stroke-linejoin="bevel" />
+                <path d="M250 169h116l58 48H228z" fill="#b9d4ce" stroke="#24251f" stroke-width="9" />
+                <path d="M307 168v51" stroke="#24251f" stroke-width="8" />
+                <path d="M178 244h364" stroke="#f1c644" stroke-width="13" />
+                <path d="M455 181h78v13h-78z" fill="#24251f" />
+                <path d="M481 178l28-26" stroke="#24251f" stroke-width="7" />
+                <circle cx="244" cy="292" r="51" fill="#171814" stroke="#24251f" stroke-width="8" />
+                <circle cx="244" cy="292" r="22" fill="#f1c644" />
+                <circle cx="476" cy="292" r="51" fill="#171814" stroke="#24251f" stroke-width="8" />
+                <circle cx="476" cy="292" r="22" fill="#f1c644" />
+                <path d="M541 237h27" stroke="#f4ead2" stroke-width="13" />
+                <path d="M172 258h-31" stroke="#c83224" stroke-width="13" />
+              </g>
+            </svg>
+            <figcaption id="garage-caption">
+              <span data-i18n="hero.scale">1:10 scale</span>
+              <strong data-i18n="hero.spec">Backyard spec</strong>
+            </figcaption>
+          </figure>
+
+          <section class="pit-console stage-item" style="--i: 2" aria-labelledby="setup-title">
+            <div class="console-heading">
+              <div>
+                <p class="section-label" data-i18n="setup.pitBoard">Pit board</p>
+                <h2 id="setup-title">Set your heat</h2>
+              </div>
+              <label class="language-picker" for="language-select">
+                <span data-i18n="setup.language">Language</span>
+                <select id="language-select" aria-label="Language">
+                  <option value="en">EN</option>
+                  <option value="es">ES</option>
+                  <option value="fr">FR</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="field">
+              <label for="room-input">Room code</label>
+              <div class="input-shell">
+                <span aria-hidden="true">#</span>
+                <input
+                  id="room-input"
+                  type="text"
+                  value="backyard"
+                  maxlength="32"
+                  autocomplete="off"
+                  spellcheck="false"
+                  aria-describedby="room-help"
+                />
+              </div>
+              <p id="room-help" class="field-help">Use the same code to race with friends.</p>
+            </div>
+
+            <fieldset class="vehicle-field">
+              <legend>Vehicle bay</legend>
+              <div class="vehicle-rail">
+                <label class="vehicle-toggle">
+                  <input type="radio" name="vehicle" value="rally" checked />
+                  <span class="vehicle-glyph rally-glyph" aria-hidden="true"></span>
+                  <strong>Rally</strong>
+                </label>
+                <label class="vehicle-toggle">
+                  <input type="radio" name="vehicle" value="buggy" />
+                  <span class="vehicle-glyph buggy-glyph" aria-hidden="true"></span>
+                  <strong>Buggy</strong>
+                </label>
+                <label class="vehicle-toggle">
+                  <input type="radio" name="vehicle" value="truck" />
+                  <span class="vehicle-glyph truck-glyph" aria-hidden="true"></span>
+                  <strong>4x4</strong>
+                </label>
+                <label class="vehicle-toggle">
+                  <input type="radio" name="vehicle" value="motorcycle" />
+                  <span class="vehicle-glyph motorcycle-glyph" aria-hidden="true"></span>
+                  <strong>Moto</strong>
+                </label>
+                <label class="vehicle-toggle">
+                  <input type="radio" name="vehicle" value="tank" />
+                  <span class="vehicle-glyph tank-glyph" aria-hidden="true"></span>
+                  <strong>Tank</strong>
+                </label>
+                <label class="vehicle-toggle">
+                  <input type="radio" name="vehicle" value="plane" />
+                  <span class="vehicle-glyph plane-glyph" aria-hidden="true"></span>
+                  <strong>Plane</strong>
+                </label>
+                <label class="vehicle-toggle">
+                  <input type="radio" name="vehicle" value="helicopter" />
+                  <span class="vehicle-glyph helicopter-glyph" aria-hidden="true"></span>
+                  <strong>Heli</strong>
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset class="kit-field">
+              <legend>Track kit</legend>
+              <label class="kit-toggle">
+                <input id="prop-jump" type="checkbox" checked />
+                <span class="kit-symbol" aria-hidden="true">/</span>
+                <span><strong>Launch ramp</strong><small>Catch air</small></span>
+              </label>
+              <label class="kit-toggle">
+                <input id="prop-loop" type="checkbox" checked />
+                <span class="kit-symbol loop-symbol" aria-hidden="true">O</span>
+                <span><strong>Stunt loop</strong><small>Go vertical</small></span>
+              </label>
+              <label class="kit-toggle">
+                <input id="prop-traffic" type="checkbox" checked />
+                <span class="kit-symbol cone-symbol" aria-hidden="true">A</span>
+                <span><strong>Street kit</strong><small>Cones + lights</small></span>
+              </label>
+            </fieldset>
+
+            <details class="signal-panel" id="signal-panel">
+              <summary>
+                <span>
+                  <span class="status-dot" aria-hidden="true"></span>
+                  <span class="relay-label" data-i18n="setup.relay">Multiplayer relay</span>
+                </span>
+                <strong id="signal-summary">Solo</strong>
+              </summary>
+              <div class="signal-content">
+                <label for="signal-input">Tailscale Serve URL</label>
+                <div class="signal-row">
+                  <input
+                    id="signal-input"
+                    type="url"
+                    inputmode="url"
+                    placeholder="your-device.tailnet.ts.net"
+                    aria-describedby="signal-help signal-status"
+                  />
+                  <button id="check-signal-btn" class="check-btn" type="button" data-i18n="setup.test">Test</button>
+                </div>
+                <p id="signal-help" class="field-help">
+                  Private rooms work when each player can reach this tailnet device.
+                </p>
+                <output id="signal-status" class="signal-status" data-state="idle" aria-live="polite">
+                  Leave blank for a solo heat.
+                </output>
+              </div>
+            </details>
+
+            <div
+              class="preference-row"
+              aria-label="Audio preferences"
+              data-i18n-aria-label="audio.preferences"
+            >
+              <button class="preference-toggle" type="button" data-audio-toggle="sfx" aria-pressed="true">
+                <span>SFX</span><strong>On</strong>
+              </button>
+              <button class="preference-toggle" type="button" data-audio-toggle="music" aria-pressed="true">
+                <span data-i18n="audio.music">Music</span><strong>On</strong>
+              </button>
+            </div>
+
+            <div class="mode-grid">
+              <button id="webxr-btn" class="race-btn primary-btn" type="button" disabled>
+                <span>Checking WebXR</span><small>AR / best ride</small>
+              </button>
+              <button id="desktop-btn" class="race-btn secondary-btn" type="button">
+                <span>Desktop race</span><small>Keyboard + gamepad</small>
+              </button>
+              <button id="eighthwall-btn" class="text-btn" type="button">
+                Use camera mode instead
+              </button>
+            </div>
+            <p id="lobby-status" class="status-text" aria-live="polite">Running pre-race checks.</p>
+          </section>
         </div>
-        <p id="lobby-status" class="status-text" aria-live="polite"></p>
+
+        <footer class="lobby-footer stage-item" style="--i: 3">
+          <span>XRRC / LAB.LIAMBROZA.COM</span>
+          <span>WebXR + Three.js + WebRTC</span>
+        </footer>
       </main>
 
-      <div id="hud" hidden>
-        <div id="peer-badge" title="Players">
-          <span id="peer-icon">🏎️</span>
-          <span id="peer-count">1</span>
-        </div>
-        <a id="share-link" href="#" class="share-link hud-share" hidden>Copy room link</a>
-        <div id="place-hint" class="hint-banner">Point at a flat surface, then tap to place the track</div>
-        <div id="joystick-zone">
-          <div id="joystick">
-            <div id="joystick-knob"></div>
+      <section id="hud" aria-label="Race controls and telemetry" hidden>
+        <div class="hud-topbar">
+          <div class="speedometer">
+            <span id="vehicle-label">Rally car</span>
+            <strong id="speed-value">00</strong>
+            <small>km/h</small>
+          </div>
+          <div id="network-pill" class="network-pill" data-state="solo">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="network-label" data-i18n="race.solo">Solo heat</span>
+            <span class="peer-count"><span id="peer-count">1</span> <span data-i18n="race.cars">cars</span></span>
+          </div>
+          <div class="hud-actions">
+            <button id="share-link" class="hud-btn" type="button" hidden data-i18n="race.invite">Invite</button>
+            <button id="reset-btn" class="hud-btn" type="button" data-i18n="race.resetAction">Reset</button>
+            <button class="hud-btn audio-hud" type="button" data-audio-toggle="sfx" aria-pressed="true">SFX</button>
+            <button class="hud-btn audio-hud" type="button" data-audio-toggle="music" aria-pressed="true" data-i18n="audio.music">Music</button>
           </div>
         </div>
-        <div id="garage-dock" class="garage-dock" role="listbox" aria-label="Car selection">
-          <div id="garage-dock-inner" class="garage-dock-inner"></div>
+
+        <div id="countdown" class="countdown" role="status" aria-live="assertive"></div>
+        <div id="toast" class="toast" role="status" aria-live="polite"></div>
+        <div id="place-hint" class="hint-banner">
+          Scan a flat surface, then tap to drop the track
         </div>
-        <div id="key-hint" class="key-hint">WASD / Arrow keys</div>
-      </div>
+
+        <div id="joystick-zone">
+          <div id="joystick" aria-label="Touch steering and throttle">
+            <span class="joystick-axis" aria-hidden="true"></span>
+            <div id="joystick-knob"></div>
+          </div>
+          <span class="joystick-label" data-i18n="race.drag">Drag to drive</span>
+        </div>
+
+        <div id="key-hint" class="key-hint">
+          <span><kbd>WASD</kbd> <span data-i18n="race.driveKeys">or arrows to drive</span></span>
+          <span><kbd>R</kbd> <span data-i18n="race.resetKey">to reset</span></span>
+          <span id="controller-status" class="controller-status" data-state="keyboard" data-i18n="controller.keyboard">Keyboard ready</span>
+        </div>
+      </section>
     </div>
 
+    <script src="runtime-config.js"></script>
+    <script src="js/config.js"></script>
+    <script src="js/i18n.js"></script>
+    <script src="js/game-core.js"></script>
+    <script src="js/controls-core.js"></script>
+    <script src="js/xr-core.js"></script>
     <script src="js/network.js"></script>
+    <script src="js/audio.js"></script>
     <script src="js/controls.js"></script>
-    <script type="importmap">
-      { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.183.2/build/three.module.js" } }
-    </script>
     <script type="module">
-      import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.183.2/build/three.module.js';
+      import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.183.2/build/three.module.min.js';
       window.THREE = THREE;
       await import('./js/game.js');
     </script>

@@ -1,0 +1,17 @@
+{
+  "name": "XRRC Backyard Rally",
+  "short_name": "XRRC",
+  "description": "Race tiny RC cars on a procedural WebXR backyard track.",
+  "start_url": "./",
+  "display": "fullscreen",
+  "background_color": "#f4ead2",
+  "theme_color": "#e84a27",
+  "icons": [
+    {
+      "src": "assets/xrrc-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

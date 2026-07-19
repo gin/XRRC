@@ -42,47 +42,12 @@ after signaling, but fully serverless discovery is not available in browsers.
 
 | File | Purpose |
 |------|---------|
-| `public/index.html` | AR-mode and track-prop selection, canvas, HUD, and the `three` import map |
-| `public/js/game.js` | Three.js scene, GLTF car models, track props, WebXR hit testing, and 8th Wall pipeline |
+| `public/index.html` | AR-mode and track-prop selection, canvas, and HUD |
+| `public/js/game.js` | Three.js scene, cars, track props, WebXR hit testing, and 8th Wall pipeline |
 | `public/js/controls.js` | Touch joystick and keyboard controls |
 | `public/js/network.js` | WebSocket signaling and WebRTC data channels |
-| `public/assets/cars/*.glb` | Car models loaded at runtime via `GLTFLoader` |
 | `server.js` | Static local server and optional multiplayer signaling |
 | `.github/workflows/pages.yml` | Static GitHub Pages deployment |
-
-### Car models
-
-`public/js/game.js` loads `.glb` files from `public/assets/cars/` via `GLTFLoader`, cached per file and
-cloned per car instance. Each clone is auto-centered, grounded, uniformly scaled to a ~0.3 m footprint, and
-yaw-corrected 180° because the source models face +Z while the game's forward direction is -Z. Any node with
-"wheel" in its name is spun during `Car.update()`; models without named wheel nodes simply skip that
-animation. If a model fails to load, `Car` falls back to the original procedural box car so gameplay never
-breaks. Remote peers pick a model deterministically from a hash of their player color, so every client
-renders the same model for a given peer without any extra network protocol.
-
-### Garage
-
-After entering the world, a dock at the bottom of the screen lists all six car models as plates with
-rendered thumbnails (snapshotted once per model with an offscreen `THREE.WebGLRenderer`). Clicking an
-available plate spawns that car onto the track and hands it control; whatever car was previously controlled
-is left parked exactly where it stopped. Clicking a plate whose car is already on the track (shown dimmed
-with a dashed border) removes that car from the world and returns it to the plate — if it was the controlled
-car, no car responds to input until another is summoned. `Game` tracks this with a `worldCars` map keyed by
-model file and a single `controlledFile`; only the controlled car receives `car-input` events and runs
-physics in `update()`, so parked cars stay inert without any extra bookkeeping.
-
-### Collisions
-
-Every `Car` carries a box collider: half-extents on the X/Z ground plane, sized from the model's actual
-`Box3` after the same load-time scale/center pass used for rendering (fallback box cars get fixed
-half-extents). Each frame the controlled car's oriented box is tested against every other car in
-`worldCars` and `remoteCars` via 2D SAT (`testOBBCollision`), which also works for cars that aren't yaw-
-aligned mid-turn. On overlap, `Game._resolveCollisions()` separates the pair along the minimum-penetration
-normal and gives each a `bumpVelocity` impulse decoupled from the driving model: the controlled car's
-impulse points back the way it came (plus a reversed, damped `velocity`), the car it hit is pushed the
-opposite way. `Car.applyBump()` integrates and damps that impulse every frame — for the controlled car as
-part of `update()`, for parked/remote cars via `Game._settleParkedCars()` — so both sides bounce briefly
-and settle without any per-car polling or ongoing physics state once the impulse decays to zero.
 
 ## 8th Wall licensing
 
@@ -105,7 +70,3 @@ respective licenses; the SLAM binary is subject to the
 - [x] Add selectable jumps and loops
 - [x] Support GitHub Pages and serverless-safe single-player
 - [x] Retain optional WebRTC multiplayer
-
-## Asset Sources
-- [Tripo](https://studio.tripo3d.ai/3d-model/d2246fae-8c19-4cdc-84d6-7a23525b724e?invite_code=VPRYX0): `car*.glb`
-- [Pixabay](https://pixabay.com/3d-models/search/glb%20car/): `toy-car*.glb`
