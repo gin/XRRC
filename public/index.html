@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="theme-color" content="#000000" />
+    <title>XRRC – WebAR RC Cars</title>
+    <link rel="stylesheet" href="css/style.css" />
+
+    <!-- A-Frame 1.5 – WebXR AR support -->
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  </head>
+
+  <body>
+    <!-- ─────────────────────────────────────────────────────────────
+         DOM Overlay – rendered on top of the AR camera feed.
+         All pointer-events live here; the <a-scene> behind is passthrough.
+    ───────────────────────────────────────────────────────────────── -->
+    <div id="overlay">
+      <!-- Lobby panel (shown before entering AR) -->
+      <div id="lobby">
+        <h1 class="logo">XRRC</h1>
+        <p class="tagline">WebAR RC Cars</p>
+
+        <div class="field">
+          <label for="room-input">Room</label>
+          <input id="room-input" type="text" value="default" maxlength="32" autocomplete="off" spellcheck="false" />
+        </div>
+
+        <button id="start-btn" class="primary-btn">Start AR</button>
+        <p id="lobby-status" class="status-text"></p>
+
+        <div class="link-group">
+          <a id="share-link" href="#" class="share-link" hidden>Copy room link</a>
+        </div>
+      </div>
+
+      <!-- In-game HUD (hidden until AR starts) -->
+      <div id="hud" hidden>
+        <!-- Peer counter -->
+        <div id="peer-badge">
+          <span id="peer-icon">🏎️</span>
+          <span id="peer-count">1</span>
+        </div>
+
+        <!-- Placement hint -->
+        <div id="place-hint" class="hint-banner">
+          Point at a flat surface, then tap to place the track
+        </div>
+
+        <!-- Virtual joystick -->
+        <div id="joystick-zone">
+          <div id="joystick">
+            <div id="joystick-knob"></div>
+          </div>
+        </div>
+
+        <!-- Keyboard hint for desktop -->
+        <div id="key-hint" class="key-hint">WASD / Arrow keys</div>
+      </div>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────
+         A-Frame scene
+    ───────────────────────────────────────────────────────────────── -->
+    <a-scene
+      id="scene"
+      webxr="requiredFeatures: hit-test; optionalFeatures: dom-overlay,dom-overlay-root: #overlay"
+      renderer="colorManagement: true; physicallyCorrectLights: true"
+      shadow="type: pcfsoft"
+      vr-mode-ui="enabled: false"
+      loading-screen="enabled: false"
+    >
+      <!-- Lighting -->
+      <a-light type="ambient" color="#ffffff" intensity="0.6"></a-light>
+      <a-light type="directional" color="#ffffff" intensity="0.8"
+               position="1 3 2" cast-shadow="true"></a-light>
+
+      <!-- AR hit-test reticle (shows where track will be placed) -->
+      <a-entity id="reticle" ar-reticle visible="false">
+        <a-ring
+          rotation="-90 0 0"
+          radius-inner="0.08"
+          radius-outer="0.13"
+          color="#ffffff"
+          opacity="0.85"
+          segments-theta="32"
+        ></a-ring>
+        <a-ring
+          rotation="-90 0 0"
+          radius-inner="0.04"
+          radius-outer="0.055"
+          color="#ffffff"
+          opacity="0.6"
+          segments-theta="16"
+        ></a-ring>
+      </a-entity>
+
+      <!-- Game root – positioned on surface placement, starts invisible -->
+      <a-entity id="game-root" visible="false">
+        <!-- Ground / track surface -->
+        <a-plane
+          id="ground"
+          rotation="-90 0 0"
+          width="2.5"
+          height="2.5"
+          color="#3d8b4a"
+          roughness="0.9"
+          metalness="0"
+          shadow="receive: true"
+        ></a-plane>
+
+        <!-- Track border lines -->
+        <a-entity track-borders></a-entity>
+
+        <!-- Local player car (spawned here; network.js adds remote cars dynamically) -->
+        <a-entity id="local-car" rc-car="isLocal: true; color: #e63946" position="0 0 0"></a-entity>
+      </a-entity>
+    </a-scene>
+
+    <!-- Scripts -->
+    <script src="js/car-component.js"></script>
+    <script src="js/network.js"></script>
+    <script src="js/controls.js"></script>
+    <script src="js/app.js"></script>
+  </body>
+</html>
